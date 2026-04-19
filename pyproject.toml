@@ -17,11 +17,10 @@ langchain-ollama = "^1.0.1"
 google-genai = "^1.61.0"
 
 [tool.poetry.group.dev.dependencies]
+python-dotenv = "^1.0"
 pytest = "^9.0.1"
-black = "^26.3.1"
-flake8 = "^7.3.0"
+ruff = "^0.15.11"
 coverage = "^7.12.0"
-pytest-cov = "^7.0.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -29,3 +28,26 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 testpaths = ["reusable_llm_provider/tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"_version.py" = ["F841"]
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "*/functional_tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

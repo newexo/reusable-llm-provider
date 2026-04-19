@@ -244,11 +244,15 @@ class OllamaProvider(BaseLLMProvider):
             raise LLMGenerationError("ollama", e) from e
 
     def invoke_json(self, prompt: str) -> dict:
-        """Generate JSON output using Ollama with JSON format."""
+        """Generate JSON output using Ollama with JSON format.
+
+        Passes ``format="json"`` as a per-call keyword argument rather than
+        mutating ``self.llm.format``; otherwise the JSON mode would leak
+        into subsequent plain ``invoke()`` calls on the same provider.
+        """
         try:
             self.llm.temperature = self.temperature
-            self.llm.format = "json"
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt, format="json")
             return json.loads(response)
         except Exception as e:
             raise LLMGenerationError("ollama", e) from e

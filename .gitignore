@@ -133,3 +133,7 @@ dmypy.json
 
 # MacOS nonsense
 .DS_Store
+
+# Secrets (keep only the README)
+secrets/*
+!secrets/README.md

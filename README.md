@@ -133,14 +133,42 @@ poetry install --with dev
 
 ### Commands
 
-| Command              | Description                          |
-|----------------------|--------------------------------------|
-| `make test`          | Run the test suite.                  |
-| `make format`        | Format the code with Black.          |
-| `make lint`          | Run Flake8 checks.                   |
-| `make check`         | Run formatting, linting and tests.   |
-| `make coverage`      | Run tests with coverage enforcement. |
-| `make coverage-html` | Create an HTML coverage report.      |
+| Command                | Description                                    |
+|------------------------|------------------------------------------------|
+| `make test`            | Run the unit test suite.                       |
+| `make functional-test` | Run live tests against real LLM providers.     |
+| `make format`          | Format the code with Ruff.                     |
+| `make lint`            | Run Ruff lint checks.                          |
+| `make check`           | Run formatting, linting and tests.             |
+| `make coverage`        | Run tests with coverage enforcement.           |
+| `make coverage-html`   | Create an HTML coverage report.                |
+
+### Functional Tests
+
+Functional tests under `functional_tests/` make live calls to real LLM
+providers and are therefore excluded from the default `make test` target
+and from CI. Run them locally with:
+
+```bash
+make functional-test
+```
+
+Requirements:
+
+- A `.env` file at `secrets/.env` containing the API keys for the
+  providers being exercised. `load_reusable_llm_provider_env()` (called
+  from `functional_tests/conftest.py`) loads this file at collection
+  time. Recognized keys include `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `OPENAI_ORGANIZATION`, `VERTEX_PROJECT_ID`, and `VERTEX_LOCATION`.
+- For Vertex AI, a valid `gcloud` authentication (`gcloud auth
+  application-default login`).
+- For the Ollama tests, a running local Ollama server with the default
+  model pulled (`ollama pull gemma2`).
+
+The `secrets/` directory is gitignored apart from its README; the `.env`
+file never leaves your machine. Tests for providers whose credentials
+are absent will fail fast rather than skip — this is intentional, so that
+a partial configuration is visible rather than silently ignored.
 
 ## Project Structure
 
