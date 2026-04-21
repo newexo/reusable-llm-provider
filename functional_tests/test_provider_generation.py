@@ -6,12 +6,18 @@ missing or incorrect, or if the local Ollama server is not running.
 """
 
 import pytest
+from pydantic import BaseModel, Field
 
 SIMPLE_PROMPT = "Explain why the sky is blue in one paragraph to a six year old."
-JSON_PROMPT = (
-    "Respond with a JSON object containing a single key 'explanation' "
-    "whose value is a one-sentence explanation of why the sky is blue."
-)
+JSON_PROMPT = "Explain in one sentence why the sky is blue."
+
+
+class SkyExplanation(BaseModel):
+    """Schema for structured-output tests."""
+
+    explanation: str = Field(
+        description="A one-sentence explanation of why the sky is blue."
+    )
 
 
 PROVIDER_FIXTURES = [
@@ -35,14 +41,13 @@ def test_provider_generates_text(provider_fixture, request):
 
 @pytest.mark.parametrize("provider_fixture", PROVIDER_FIXTURES)
 def test_provider_generates_json(provider_fixture, request):
-    """Provider can generate a parsed JSON dict."""
+    """Provider can generate schema-conforming structured output."""
     provider = request.getfixturevalue(provider_fixture)
-    result = provider.invoke_json(JSON_PROMPT)
+    result = provider.invoke_json(JSON_PROMPT, SkyExplanation)
 
-    assert isinstance(result, dict)
-    assert "explanation" in result
-    assert isinstance(result["explanation"], str)
-    assert len(result["explanation"]) > 0
+    assert isinstance(result, SkyExplanation)
+    assert isinstance(result.explanation, str)
+    assert len(result.explanation) > 0
 
 
 @pytest.mark.parametrize("provider_fixture", PROVIDER_FIXTURES)
@@ -55,12 +60,12 @@ def test_invoke_after_invoke_json_returns_plain_text(provider_fixture, request):
     """
     provider = request.getfixturevalue(provider_fixture)
 
-    _ = provider.invoke_json(JSON_PROMPT)
+    _ = provider.invoke_json(JSON_PROMPT, SkyExplanation)
     result = provider.invoke(SIMPLE_PROMPT)
 
     assert isinstance(result, str)
     assert len(result) > 0
     stripped = result.strip()
-    assert not (
-        stripped.startswith("{") and stripped.endswith("}")
-    ), f"Expected prose output after invoke_json; got JSON-shaped string: {stripped[:200]}"
+    assert not (stripped.startswith("{") and stripped.endswith("}")), (
+        f"Expected prose output after invoke_json; got JSON-shaped string: {stripped[:200]}"
+    )

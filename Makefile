@@ -10,7 +10,7 @@ test:
 
 # Run functional tests (live calls to real LLM providers).
 # Requires secrets/.env with appropriate API keys and a running Ollama server.
-functional-test:
+test-functional:
 	poetry run pytest functional_tests
 
 # Format the code using Ruff
