@@ -1,19 +1,20 @@
-"""Functional tests for provider text and JSON generation.
+"""Functional tests for provider text and structured generation.
 
-These tests verify that each provider can successfully generate text and
-JSON output when given simple prompts. Tests fail if credentials are
-missing or incorrect, or if the local Ollama server is not running.
+These tests verify that each provider can successfully generate free-form
+text and validated typed output when given simple prompts. Tests fail if
+credentials are missing or incorrect, or if the local Ollama server is
+not running.
 """
 
 import pytest
 from pydantic import BaseModel, Field
 
 SIMPLE_PROMPT = "Explain why the sky is blue in one paragraph to a six year old."
-JSON_PROMPT = "Explain in one sentence why the sky is blue."
+STRUCTURED_PROMPT = "Explain in one sentence why the sky is blue."
 
 
 class SkyExplanation(BaseModel):
-    """Schema for structured-output tests."""
+    """Output model for structured-generation tests."""
 
     explanation: str = Field(
         description="A one-sentence explanation of why the sky is blue."
@@ -40,10 +41,10 @@ def test_provider_generates_text(provider_fixture, request):
 
 
 @pytest.mark.parametrize("provider_fixture", PROVIDER_FIXTURES)
-def test_provider_generates_json(provider_fixture, request):
-    """Provider can generate schema-conforming structured output."""
+def test_provider_generates_structured_output(provider_fixture, request):
+    """Provider returns a validated instance of the requested output model."""
     provider = request.getfixturevalue(provider_fixture)
-    result = provider.invoke_json(JSON_PROMPT, SkyExplanation)
+    result = provider.invoke_structured(STRUCTURED_PROMPT, SkyExplanation)
 
     assert isinstance(result, SkyExplanation)
     assert isinstance(result.explanation, str)
@@ -51,21 +52,22 @@ def test_provider_generates_json(provider_fixture, request):
 
 
 @pytest.mark.parametrize("provider_fixture", PROVIDER_FIXTURES)
-def test_invoke_after_invoke_json_returns_plain_text(provider_fixture, request):
-    """Regression: a plain invoke following invoke_json must still return prose.
+def test_invoke_after_invoke_structured_returns_plain_text(provider_fixture, request):
+    """Regression: a plain invoke following invoke_structured must still return prose.
 
-    Guards against providers that mutate shared client state in invoke_json
-    (e.g. setting format='json' on the underlying client) and fail to reset
-    it before the next plain invoke.
+    Guards against providers that mutate shared client state during
+    structured generation (e.g. setting format='json' on the underlying
+    client) and fail to reset it before the next plain invoke.
     """
     provider = request.getfixturevalue(provider_fixture)
 
-    _ = provider.invoke_json(JSON_PROMPT, SkyExplanation)
+    _ = provider.invoke_structured(STRUCTURED_PROMPT, SkyExplanation)
     result = provider.invoke(SIMPLE_PROMPT)
 
     assert isinstance(result, str)
     assert len(result) > 0
     stripped = result.strip()
     assert not (stripped.startswith("{") and stripped.endswith("}")), (
-        f"Expected prose output after invoke_json; got JSON-shaped string: {stripped[:200]}"
+        "Expected prose output after invoke_structured; got JSON-shaped "
+        f"string: {stripped[:200]}"
     )

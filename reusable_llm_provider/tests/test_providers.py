@@ -3,14 +3,74 @@
 import pytest
 from unittest.mock import Mock, patch
 from reusable_llm_provider.config import LLMConfig, LLMProviderType
+from pydantic import BaseModel
+
 from reusable_llm_provider.providers import (
     LLMGenerationError,
+    StructuredOutputStrategy,
+    StructuredOutputValidationError,
     AnthropicProvider,
     OpenAIProvider,
     VertexAIProvider,
     OllamaProvider,
     create_provider,
 )
+
+
+class _Echo(BaseModel):
+    name: str
+
+
+class _StubProvider(AnthropicProvider):
+    """AnthropicProvider with the network primitives stubbed out for unit
+    tests of the base class's local-validation contract."""
+
+    def __init__(self, candidate, raw=None):
+        # Skip parent __init__ to avoid constructing real SDK clients.
+        self.NAME = "stub"
+        self.STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
+        self.model = "stub"
+        self.max_tokens = 1
+        self.temperature = 0.0
+        self._candidate = candidate
+        self._raw = raw
+
+    def _invoke_structured_candidate(self, prompt, output_model):
+        return self._candidate, self._raw
+
+
+class TestLocalValidation:
+    """The base class must always validate the candidate locally."""
+
+    def test_basemodel_candidate_is_revalidated(self):
+        provider = _StubProvider(candidate=_Echo(name="ok"))
+        result = provider.invoke_structured("p", _Echo)
+        assert isinstance(result, _Echo)
+        assert result.name == "ok"
+
+    def test_dict_candidate_is_validated(self):
+        provider = _StubProvider(candidate={"name": "ok"})
+        result = provider.invoke_structured("p", _Echo)
+        assert result.name == "ok"
+
+    def test_json_string_candidate_is_validated(self):
+        provider = _StubProvider(candidate='{"name": "ok"}')
+        result = provider.invoke_structured("p", _Echo)
+        assert result.name == "ok"
+
+    def test_invalid_candidate_raises_structured_output_validation_error(self):
+        provider = _StubProvider(candidate={"wrong_key": "ok"}, raw="raw-blob")
+        with pytest.raises(StructuredOutputValidationError) as exc_info:
+            provider.invoke_structured("p", _Echo)
+        err = exc_info.value
+        assert err.output_model is _Echo
+        assert err.strategy is StructuredOutputStrategy.LANGCHAIN_MEDIATED
+        assert err.raw == "raw-blob"
+
+    def test_none_candidate_raises_structured_output_validation_error(self):
+        provider = _StubProvider(candidate=None, raw=None)
+        with pytest.raises(StructuredOutputValidationError):
+            provider.invoke_structured("p", _Echo)
 
 
 class TestLLMGenerationError:

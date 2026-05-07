@@ -1,18 +1,27 @@
 """Provider abstraction layer for LLM APIs.
 
-This module provides a unified interface for different LLM providers (Anthropic,
-OpenAI, Vertex AI, Ollama) while wrapping their specific SDKs.
+This module provides a unified interface for different LLM providers
+(Anthropic, OpenAI, Vertex AI, Ollama). The public contract is intentionally
+small and framework-neutral:
 
-Structured output uses langchain's ``with_structured_output`` with a
-caller-supplied Pydantic schema. This gives us schema-enforced decoding where
-the provider supports it (OpenAI json_schema, Anthropic tool-use, Vertex
-json_schema, Ollama json_schema) and returns the raw ``AIMessage`` alongside
-parsing errors via ``include_raw=True`` so diagnostics are preserved.
+- ``invoke(prompt) -> str`` for free-form text generation.
+- ``invoke_structured(prompt, output_model) -> BaseModel`` for typed output.
+
+Callers supply a Pydantic model class as ``output_model`` and receive a
+validated instance of that exact class. How a given backend produces the
+candidate value (native JSON-schema decoding, tool calling, constrained
+decoding, text extraction, or framework mediation such as LangChain) is an
+internal implementation detail captured by ``StructuredOutputStrategy``.
+
+Local Pydantic validation is always applied to the candidate before returning,
+regardless of any vendor guarantees. This keeps the public contract grounded
+in local type safety rather than provider promises.
 """
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Protocol, Type
+from enum import Enum
+from typing import Any, Protocol, Type
 
 from anthropic import Anthropic
 from google import genai
@@ -22,20 +31,32 @@ from langchain_google_vertexai import ChatVertexAI
 from langchain_ollama import ChatOllama, OllamaLLM
 from langchain_openai import ChatOpenAI
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, LLMProviderType
 
 
-class LLMGenerationError(Exception):
-    """Exception raised when LLM generation fails.
+class StructuredOutputStrategy(str, Enum):
+    """How a provider attempts to produce structured output.
 
-    When the error occurred while parsing structured output, ``raw`` holds
-    the provider's raw response (typically an ``AIMessage``) so callers can
-    inspect exactly what came back.
+    These are interchangeable internal strategies. The public
+    ``invoke_structured`` contract is identical regardless of which
+    strategy a provider uses; the enum exists so maintainers can reason
+    about provider quality and migration risk as vendor ecosystems
+    evolve.
     """
 
-    def __init__(self, provider: str, original_error: Exception, raw=None):
+    NATIVE_JSON_SCHEMA = "native_json_schema"
+    TOOL_CALLING = "tool_calling"
+    CONSTRAINED_DECODING = "constrained_decoding"
+    TEXT_EXTRACTION = "text_extraction"
+    LANGCHAIN_MEDIATED = "langchain_mediated"
+
+
+class LLMGenerationError(Exception):
+    """Base class for failures in LLM generation."""
+
+    def __init__(self, provider: str, original_error: Exception, raw: Any = None):
         self.provider = provider
         self.original_error = original_error
         self.raw = raw
@@ -47,29 +68,89 @@ class LLMGenerationError(Exception):
         super().__init__(message)
 
 
+class LLMTransportError(LLMGenerationError):
+    """The provider could not be reached or the request itself failed.
+
+    Covers network errors, authentication failures, rate-limit responses,
+    and other transport-layer faults where no usable content was produced
+    by the model. SDK exception classification is best-effort; ambiguous
+    failures fall back to ``LLMGenerationError``.
+    """
+
+
+class LLMProviderGenerationError(LLMGenerationError):
+    """The provider responded but indicated a generation-side failure.
+
+    Covers content-filter refusals, explicit error responses from the
+    model, or empty completions where the provider did not raise but
+    returned no usable output.
+    """
+
+
+class StructuredOutputValidationError(LLMGenerationError):
+    """The provider returned content that did not validate against the
+    requested Pydantic ``output_model``.
+
+    Attributes:
+        provider: Name of the provider that produced the content.
+        output_model: The Pydantic model class the caller requested.
+        strategy: Which ``StructuredOutputStrategy`` was used.
+        validation_error: The underlying ``pydantic.ValidationError`` (or
+            other parse error) describing why validation failed.
+        raw: The raw provider response, when available.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        output_model: Type[BaseModel],
+        strategy: StructuredOutputStrategy,
+        validation_error: Exception,
+        raw: Any = None,
+    ):
+        self.output_model = output_model
+        self.strategy = strategy
+        super().__init__(provider, validation_error, raw=raw)
+        self.args = (
+            f"Structured output for {provider} did not validate against "
+            f"{output_model.__name__} (strategy={strategy.value}): "
+            f"{type(validation_error).__name__}: {validation_error}",
+        )
+
+    @property
+    def validation_error(self) -> Exception:
+        return self.original_error
+
+
 class LLMProvider(Protocol):
-    """Protocol defining the interface for LLM providers."""
+    """Public protocol for LLM providers."""
 
     def invoke(self, prompt: str) -> str:
-        """Generate text from a prompt.
+        """Generate free-form text from ``prompt``.
 
         Raises:
             LLMGenerationError: If generation fails.
         """
         ...
 
-    def invoke_json(self, prompt: str, schema: Type[BaseModel]) -> BaseModel:
-        """Generate structured output conforming to ``schema``.
+    def invoke_structured(
+        self, prompt: str, output_model: Type[BaseModel]
+    ) -> BaseModel:
+        """Generate a typed result conforming to ``output_model``.
 
-        Uses the provider's strongest available structured-output mechanism
-        (native JSON-schema decoding, tool-use, or equivalent). Returns an
-        instance of ``schema``.
+        The return value is always an instance of ``output_model``,
+        validated locally via Pydantic regardless of any provider-side
+        guarantees.
 
         Raises:
-            LLMGenerationError: If generation or parsing fails. When the
-                provider returned text but the parse failed, the raw
-                ``AIMessage`` is attached to the original error for
-                diagnostics.
+            StructuredOutputValidationError: If the provider returned
+                content but it did not validate against ``output_model``.
+            LLMTransportError: If the request failed before any content
+                was produced.
+            LLMProviderGenerationError: If the provider explicitly
+                signaled a generation failure or refusal.
+            LLMGenerationError: For any other failure not classified
+                above.
         """
         ...
 
@@ -77,17 +158,19 @@ class LLMProvider(Protocol):
 class BaseLLMProvider(ABC):
     """Template-method base class for LLM providers.
 
-    Subclasses supply two primitives: ``_invoke_raw_text(prompt)`` which
-    returns a raw text string, and ``_structured_model()`` which returns a
-    langchain chat model suitable for ``with_structured_output``. This
-    base handles the shared concerns: wrapping every exception in
-    ``LLMGenerationError`` with the subclass's ``NAME`` and applying
-    schema-enforced structured decoding with ``include_raw=True`` so
-    parsing errors preserve the raw provider response.
+    Subclasses supply two primitives:
+
+    - ``_invoke_raw_text(prompt)`` — return free-form text.
+    - ``_invoke_structured_candidate(prompt, output_model)`` — return a
+      candidate value (a ``BaseModel`` instance, a dict, or a JSON
+      string) that this base will validate locally.
+
+    The base handles error wrapping and the mandatory local Pydantic
+    validation step.
     """
 
     NAME: str = ""
-    STRUCTURED_OUTPUT_METHOD: str | None = None
+    STRATEGY: StructuredOutputStrategy = StructuredOutputStrategy.LANGCHAIN_MEDIATED
 
     def __init__(self, config: LLMConfig):
         self.model = config.model
@@ -96,9 +179,10 @@ class BaseLLMProvider(ABC):
 
     @contextmanager
     def _wrap_errors(self):
-        """Context manager that rewraps any exception as LLMGenerationError."""
         try:
             yield
+        except LLMGenerationError:
+            raise
         except Exception as e:
             raise LLMGenerationError(self.NAME, e) from e
 
@@ -106,37 +190,105 @@ class BaseLLMProvider(ABC):
         with self._wrap_errors():
             return self._invoke_raw_text(prompt)
 
-    def invoke_json(self, prompt: str, schema: Type[BaseModel]) -> BaseModel:
+    def invoke_structured(
+        self, prompt: str, output_model: Type[BaseModel]
+    ) -> BaseModel:
         with self._wrap_errors():
-            chat_model = self._structured_model()
-            kwargs = {"include_raw": True}
-            if self.STRUCTURED_OUTPUT_METHOD is not None:
-                kwargs["method"] = self.STRUCTURED_OUTPUT_METHOD
-            structured = chat_model.with_structured_output(schema, **kwargs)
-            result = structured.invoke(prompt)
-            parsed = result.get("parsed")
-            parsing_error = result.get("parsing_error")
-            if parsed is None or parsing_error is not None:
-                error = parsing_error or ValueError(
-                    "Structured output returned no parsed value"
+            candidate, raw = self._invoke_structured_candidate(prompt, output_model)
+            return self._validate_candidate(candidate, output_model, raw)
+
+    def _validate_candidate(
+        self,
+        candidate: Any,
+        output_model: Type[BaseModel],
+        raw: Any,
+    ) -> BaseModel:
+        """Run mandatory local Pydantic validation on ``candidate``.
+
+        Even when a strategy claims native schema enforcement, the
+        candidate is re-validated against ``output_model`` so the public
+        contract rests on local type safety, not vendor promises.
+        """
+        if candidate is None:
+            raise StructuredOutputValidationError(
+                provider=self.NAME,
+                output_model=output_model,
+                strategy=self.STRATEGY,
+                validation_error=ValueError(
+                    "Structured output strategy returned no candidate value"
+                ),
+                raw=raw,
+            )
+        try:
+            if isinstance(candidate, BaseModel):
+                payload = candidate.model_dump()
+            elif isinstance(candidate, dict):
+                payload = candidate
+            elif isinstance(candidate, str):
+                return output_model.model_validate_json(candidate)
+            else:
+                raise TypeError(
+                    f"Unsupported candidate type from strategy "
+                    f"{self.STRATEGY.value}: {type(candidate).__name__}"
                 )
-                raise LLMGenerationError(self.NAME, error, raw=result.get("raw"))
-            return parsed
+            return output_model.model_validate(payload)
+        except (ValidationError, ValueError, TypeError) as e:
+            raise StructuredOutputValidationError(
+                provider=self.NAME,
+                output_model=output_model,
+                strategy=self.STRATEGY,
+                validation_error=e,
+                raw=raw,
+            ) from e
 
     @abstractmethod
     def _invoke_raw_text(self, prompt: str) -> str:
         """Return the provider's raw text output for ``prompt``."""
 
     @abstractmethod
+    def _invoke_structured_candidate(
+        self, prompt: str, output_model: Type[BaseModel]
+    ) -> tuple[Any, Any]:
+        """Return ``(candidate, raw)`` from the provider.
+
+        ``candidate`` may be a ``BaseModel`` instance, a dict, or a JSON
+        string. ``raw`` is the unparsed provider response when
+        available, used to enrich diagnostics on validation failure.
+        """
+
+
+class _LangChainStructuredMixin:
+    """Internal helper: produce a structured candidate via LangChain.
+
+    LangChain is one of several possible strategies and is treated as a
+    private implementation detail. Its specific result shape
+    (``include_raw=True`` returning ``{"parsed", "raw", "parsing_error"}``)
+    must not leak past this mixin.
+    """
+
+    _LANGCHAIN_METHOD: str | None = None
+
     def _structured_model(self):
-        """Return a langchain chat model supporting ``with_structured_output``."""
+        raise NotImplementedError
+
+    def _invoke_structured_candidate(
+        self, prompt: str, output_model: Type[BaseModel]
+    ) -> tuple[Any, Any]:
+        chat_model = self._structured_model()
+        kwargs = {"include_raw": True}
+        if self._LANGCHAIN_METHOD is not None:
+            kwargs["method"] = self._LANGCHAIN_METHOD
+        structured = chat_model.with_structured_output(output_model, **kwargs)
+        result = structured.invoke(prompt)
+        return result.get("parsed"), result.get("raw")
 
 
-class AnthropicProvider(BaseLLMProvider):
+class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for Anthropic's Claude API."""
 
     NAME = "anthropic"
-    STRUCTURED_OUTPUT_METHOD = "function_calling"
+    STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
+    _LANGCHAIN_METHOD = "function_calling"
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -161,11 +313,12 @@ class AnthropicProvider(BaseLLMProvider):
         return self.chat_model
 
 
-class OpenAIProvider(BaseLLMProvider):
+class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for OpenAI's API."""
 
     NAME = "openai"
-    STRUCTURED_OUTPUT_METHOD = "json_schema"
+    STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
+    _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -194,17 +347,16 @@ class OpenAIProvider(BaseLLMProvider):
         return self.chat_model
 
 
-class VertexAIProvider(BaseLLMProvider):
+class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for Google's Vertex AI (Gemini).
 
-    Uses the native ``google.genai`` SDK for free-form text generation and
-    ``langchain_google_vertexai.ChatVertexAI`` for structured output so
-    ``with_structured_output`` can apply Vertex's native JSON-schema
-    decoding.
+    Uses the native ``google.genai`` SDK for free-form text generation
+    and the LangChain Vertex chat model for structured output.
     """
 
     NAME = "vertex"
-    STRUCTURED_OUTPUT_METHOD = "json_schema"
+    STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
+    _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -238,20 +390,14 @@ class VertexAIProvider(BaseLLMProvider):
         return self.chat_model
 
 
-class OllamaProvider(BaseLLMProvider):
-    """Provider for local Ollama instances.
-
-    Uses ``OllamaLLM`` for free-form text and ``ChatOllama`` for structured
-    output so ``with_structured_output`` can apply Ollama's native JSON-
-    schema constrained decoding (stricter than ``format="json"``).
-    """
+class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
+    """Provider for local Ollama instances."""
 
     NAME = "ollama"
+    STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        # Temperature fixed at construction time; per-call mutation was the
-        # shape of the sticky-``format`` bug we previously fixed.
         self.llm = OllamaLLM(model=config.model, temperature=self.temperature)
         self.chat_model = ChatOllama(model=config.model, temperature=self.temperature)
 
