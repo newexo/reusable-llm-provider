@@ -15,15 +15,27 @@ class TestLLMConfig:
     """Tests for LLMConfig."""
 
     def test_create_config_with_defaults(self):
-        """Test creating config with default temperature and max_tokens."""
+        """Temperature defaults to unset; max_tokens keeps its numeric default."""
         config = LLMConfig(
             provider=LLMProviderType.ANTHROPIC,
             model="claude-3-sonnet",
         )
         assert config.provider == LLMProviderType.ANTHROPIC
         assert config.model == "claude-3-sonnet"
-        assert config.temperature == 0.0
+        # None means "omit from the request". Sending a default temperature
+        # made Claude 5 and GPT-5 reasoning models reject every call.
+        assert config.temperature is None
         assert config.max_tokens == 1000
+
+    def test_explicit_temperature_is_preserved(self):
+        """An explicit value still reaches the provider, zero included."""
+        for value in (0.0, 0.7):
+            config = LLMConfig(
+                provider=LLMProviderType.ANTHROPIC,
+                model="claude-3-sonnet",
+                temperature=value,
+            )
+            assert config.temperature == value
 
     def test_create_config_with_custom_values(self):
         """Test creating config with custom temperature and max_tokens."""

@@ -71,3 +71,44 @@ def test_invoke_after_invoke_structured_returns_plain_text(provider_fixture, req
         "Expected prose output after invoke_structured; got JSON-shaped "
         f"string: {stripped[:200]}"
     )
+
+
+# Models that reject the `temperature` parameter outright. The library's
+# default model, claude-haiku-4-5, still accepts it, so every test above would
+# have passed before temperature became opt-in — none of them exercise the
+# case the change exists for. These do.
+TEMPERATURE_REJECTING_MODELS = ["claude-sonnet-5", "claude-opus-5"]
+
+
+@pytest.mark.parametrize("model", TEMPERATURE_REJECTING_MODELS)
+def test_models_that_reject_temperature_are_usable(model):
+    """Newer models must work when temperature is left unset.
+
+    Sending `temperature` to these returns 400 invalid_request_error. Before
+    temperature became opt-in the library sent it unconditionally, so these
+    models could not be driven at all.
+    """
+    from reusable_llm_provider.config import create_anthropic_config
+    from reusable_llm_provider.providers import create_provider
+
+    provider = create_provider(create_anthropic_config(model=model))
+    result = provider.invoke(STRUCTURED_PROMPT)
+
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+@pytest.mark.parametrize("model", TEMPERATURE_REJECTING_MODELS)
+def test_explicit_temperature_still_rejected_by_these_models(model):
+    """The escape hatch remains closed where the provider says it is closed.
+
+    Passing temperature explicitly must still reach the API and still fail.
+    The library omits the parameter by default; it does not silently discard
+    a value the caller asked for.
+    """
+    from reusable_llm_provider.config import create_anthropic_config
+    from reusable_llm_provider.providers import LLMGenerationError, create_provider
+
+    provider = create_provider(create_anthropic_config(model=model, temperature=0.0))
+    with pytest.raises(LLMGenerationError):
+        provider.invoke(STRUCTURED_PROMPT)

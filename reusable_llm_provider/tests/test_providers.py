@@ -283,3 +283,47 @@ class TestOllamaProvider:
         )
         provider = OllamaProvider(config)
         assert provider.model == "llama2"
+
+
+class TestSamplingOmission:
+    """The temperature parameter must be absent, not null, when unset.
+
+    Anthropic's Claude 5 family and OpenAI's GPT-5 reasoning models reject the
+    field outright; Gemini 3.x accepts and ignores it. Sending null is not
+    equivalent to omitting it, so this asserts on the kwargs dict itself
+    rather than on behaviour further downstream.
+    """
+
+    def _provider(self, temperature):
+        from reusable_llm_provider.config import LLMConfig, LLMProviderType
+        from reusable_llm_provider.providers import BaseLLMProvider
+
+        class _Bare(BaseLLMProvider):
+            NAME = "bare"
+
+            def _invoke_raw_text(self, prompt):  # pragma: no cover
+                return ""
+
+            def _invoke_structured_candidate(self, prompt, output_model):
+                return None  # pragma: no cover
+
+        return _Bare(
+            LLMConfig(
+                provider=LLMProviderType.ANTHROPIC,
+                model="m",
+                temperature=temperature,
+            )
+        )
+
+    def test_unset_temperature_yields_no_kwargs(self):
+        assert self._provider(None)._sampling() == {}
+
+    def test_explicit_zero_is_still_sent(self):
+        """Zero is a meaningful value and must not be confused with unset."""
+        assert self._provider(0.0)._sampling() == {"temperature": 0.0}
+
+    def test_explicit_value_is_sent(self):
+        assert self._provider(0.7)._sampling() == {"temperature": 0.7}
+
+    def test_key_can_be_renamed_for_providers_that_differ(self):
+        assert self._provider(0.5)._sampling("temp") == {"temp": 0.5}

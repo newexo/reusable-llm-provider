@@ -177,6 +177,17 @@ class BaseLLMProvider(ABC):
         self.max_tokens = config.max_tokens
         self.temperature = config.temperature
 
+    def _sampling(self, key: str = "temperature") -> dict:
+        """Keyword arguments for sampling, empty when temperature is unset.
+
+        Returned as a dict to splat into a call, so that an unset temperature
+        is genuinely absent from the request rather than sent as null. Several
+        providers reject the parameter outright on their newest models.
+        """
+        if self.temperature is None:
+            return {}
+        return {key: self.temperature}
+
     @contextmanager
     def _wrap_errors(self):
         try:
@@ -297,15 +308,15 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
             model=self.model,
             api_key=config.anthropic_api_key,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
+            **self._sampling(),
         )
 
     def _invoke_raw_text(self, prompt: str) -> str:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
             messages=[{"role": "user", "content": prompt}],
+            **self._sampling(),
         )
         return response.content[0].text
 
@@ -331,15 +342,15 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             api_key=config.openai_api_key,
             organization=config.openai_organization,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
+            **self._sampling(),
         )
 
     def _invoke_raw_text(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
             messages=[{"role": "user", "content": prompt}],
+            **self._sampling(),
         )
         return response.choices[0].message.content
 
@@ -370,14 +381,14 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             model=self.model,
             project=config.vertex_project_id,
             location=config.vertex_location,
-            temperature=self.temperature,
             max_output_tokens=self.max_tokens,
+            **self._sampling(),
         )
 
     def _invoke_raw_text(self, prompt: str) -> str:
         request_config = types.GenerateContentConfig(
-            temperature=self.temperature,
             max_output_tokens=self.max_tokens,
+            **self._sampling(),
         )
         response = self.client.models.generate_content(
             model=self.model,
@@ -398,8 +409,8 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        self.llm = OllamaLLM(model=config.model, temperature=self.temperature)
-        self.chat_model = ChatOllama(model=config.model, temperature=self.temperature)
+        self.llm = OllamaLLM(model=config.model, **self._sampling())
+        self.chat_model = ChatOllama(model=config.model, **self._sampling())
 
     def _invoke_raw_text(self, prompt: str) -> str:
         return self.llm.invoke(prompt)

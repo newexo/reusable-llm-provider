@@ -47,7 +47,16 @@ class LLMConfig:
     ):
         self.provider = provider
         self.model = model
-        self.temperature = temperature if temperature is not None else 0.0
+        # None means "do not send temperature at all", and is the default.
+        #
+        # The sampling parameter is being withdrawn across the industry, and it
+        # fails three different ways: Anthropic's Claude 5 family and OpenAI's
+        # GPT-5 reasoning models reject the request outright, while Gemini 3.x
+        # accepts and silently ignores it. Ollama still honours it. Sending a
+        # value by default therefore made the newest models of two providers
+        # unusable. Callers who want deterministic sampling, and are on a model
+        # that still supports it, pass temperature explicitly.
+        self.temperature = temperature
         self.max_tokens = max_tokens if max_tokens is not None else 1000
 
         self.anthropic_api_key = anthropic_api_key
