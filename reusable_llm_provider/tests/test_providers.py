@@ -222,6 +222,73 @@ class TestAnthropicProvider:
         assert exc_info.value.provider == "anthropic"
         assert isinstance(exc_info.value.original_error, RuntimeError)
 
+    @staticmethod
+    def _block(block_type: str, text: str | None = None):
+        """A stand-in for an SDK content block.
+
+        A thinking block genuinely has no ``text`` attribute, so the stub
+        deletes it rather than leaving a Mock auto-attribute in its place —
+        otherwise the bug under test cannot reproduce.
+        """
+        block = Mock()
+        block.type = block_type
+        if text is None:
+            del block.text
+        else:
+            block.text = text
+        return block
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_anthropic_invoke_skips_thinking_blocks(self, mock_anthropic):
+        """Extended thinking puts a non-text block first; invoke must skip it.
+
+        Indexing content[0] blindly raises AttributeError on any model that
+        returns a thinking block, which _wrap_errors then reports as a
+        generation failure rather than the local bug it is.
+        """
+        response = Mock()
+        response.content = [
+            self._block("thinking"),
+            self._block("text", "The sky is blue."),
+        ]
+        mock_client = Mock()
+        mock_client.messages.create.return_value = response
+        mock_anthropic.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC,
+            model="claude-opus-5",
+            anthropic_api_key="test-key",
+        )
+
+        assert AnthropicProvider(config).invoke("test prompt") == "The sky is blue."
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_anthropic_invoke_joins_multiple_text_blocks(self, mock_anthropic):
+        """All text blocks are returned, not just the first.
+
+        Tool-using turns emit intermediate prose ("let me look that up")
+        as its own block; returning only the first drops the real answer.
+        """
+        response = Mock()
+        response.content = [
+            self._block("text", "Let me look that up."),
+            self._block("tool_use"),
+            self._block("text", "The sky is blue."),
+        ]
+        mock_client = Mock()
+        mock_client.messages.create.return_value = response
+        mock_anthropic.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC,
+            model="claude-opus-5",
+            anthropic_api_key="test-key",
+        )
+
+        result = AnthropicProvider(config).invoke("test prompt")
+        assert result == "Let me look that up.\n\nThe sky is blue."
+
 
 class TestOpenAIProvider:
     """Tests for OpenAIProvider."""
