@@ -27,7 +27,7 @@ from anthropic import Anthropic
 from google import genai
 from google.genai import types
 from langchain_anthropic import ChatAnthropic
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama, OllamaLLM
 from langchain_openai import ChatOpenAI
 from openai import OpenAI
@@ -362,7 +362,7 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for Google's Vertex AI (Gemini).
 
     Uses the native ``google.genai`` SDK for free-form text generation
-    and the LangChain Vertex chat model for structured output.
+    and ``ChatGoogleGenerativeAI`` in Vertex mode for structured output.
     """
 
     NAME = "vertex"
@@ -377,12 +377,18 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             location=config.vertex_location,
             http_options=types.HttpOptions(api_version="v1"),
         )
-        self.chat_model = ChatVertexAI(
+        self.chat_model = ChatGoogleGenerativeAI(
             model=self.model,
             project=config.vertex_project_id,
             location=config.vertex_location,
+            vertexai=True,
             max_output_tokens=self.max_tokens,
-            **self._sampling(),
+            # Passed explicitly rather than splatted via ``_sampling()``.
+            # ChatGoogleGenerativeAI defaults temperature to 0.7 and sends it,
+            # so simply omitting the argument would start applying a sampling
+            # value this package's contract says must be absent. Assigning None
+            # keeps it out of the request, matching the other providers.
+            temperature=self.temperature,
         )
 
     def _invoke_raw_text(self, prompt: str) -> str:
