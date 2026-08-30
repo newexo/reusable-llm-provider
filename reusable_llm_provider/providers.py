@@ -199,7 +199,26 @@ class BaseLLMProvider(ABC):
 
     def invoke(self, prompt: str) -> str:
         with self._wrap_errors():
-            return self._invoke_raw_text(prompt)
+            return self._require_text(self._invoke_raw_text(prompt))
+
+    def _require_text(self, text: Any) -> str:
+        """Reject a response that carries no usable text.
+
+        Reasoning models share one token budget between thinking and output, so
+        a long thinking pass can exhaust it before any text is produced. The
+        providers signal that differently and neither shape is a usable string:
+        Vertex sets ``.text`` to None, and Anthropic returns a response whose
+        only block is a thinking block, which joins to "". Returning either
+        silently pushes the failure into the caller, where it surfaces far from
+        its cause, so it is raised here as the generation failure it is.
+        """
+        if text is None or not text.strip():
+            raise LLMProviderGenerationError(
+                self.NAME,
+                ValueError("Provider returned no text content"),
+                raw=text,
+            )
+        return text
 
     def invoke_structured(
         self, prompt: str, output_model: Type[BaseModel]
