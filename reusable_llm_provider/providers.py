@@ -350,7 +350,9 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     def _invoke_raw_text(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=self.max_tokens,
+            # Not max_tokens: GPT-5 models reject that outright, and
+            # max_completion_tokens is accepted by the older gpt-4o family too.
+            max_completion_tokens=self.max_tokens,
             messages=[{"role": "user", "content": prompt}],
             **self._sampling(),
         )
