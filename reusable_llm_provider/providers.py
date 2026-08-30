@@ -318,7 +318,9 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
             messages=[{"role": "user", "content": prompt}],
             **self._sampling(),
         )
-        return response.content[0].text
+        return "\n\n".join(
+            block.text for block in response.content if block.type == "text"
+        )
 
     def _structured_model(self):
         return self.chat_model

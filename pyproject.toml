@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "reusable_llm_provider"
-version = "0.4.1"
+version = "0.4.2"
 description = "Reusable LLM provider abstraction layer supporting Anthropic, OpenAI, Vertex AI, and Ollama"
 authors = ["Reuben Brasher <rkbrasher@gmail.com>"]
 license = "MIT"
