@@ -51,7 +51,7 @@ from reusable_llm_provider.config import (
 config = create_anthropic_config()
 
 # Reads OPENAI_API_KEY and OPENAI_ORGANIZATION from the environment
-config = create_openai_config(model="gpt-4o-mini", temperature=0.2)
+config = create_openai_config(model="gpt-5.4-nano", temperature=0.2)
 
 # Reads VERTEX_PROJECT_ID and VERTEX_LOCATION from the environment
 config = create_vertex_config()
@@ -144,7 +144,7 @@ The factory functions use sensible default models when none is specified:
 | Provider  | Default Model                  |
 |-----------|--------------------------------|
 | Anthropic | `claude-haiku-4-5-20251001`    |
-| OpenAI    | `gpt-4o-mini`                  |
+| OpenAI    | `gpt-5.4-nano`                 |
 | Vertex AI | `gemini-2.5-flash`             |
 | Ollama    | `gemma2`                       |
 

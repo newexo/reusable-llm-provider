@@ -323,6 +323,32 @@ class TestOpenAIProvider:
 
         assert exc_info.value.provider == "openai"
 
+    @patch("reusable_llm_provider.providers.OpenAI")
+    def test_openai_invoke_uses_max_completion_tokens(self, mock_openai):
+        """The token cap must be sent as max_completion_tokens.
+
+        GPT-5 models reject max_tokens outright with unsupported_parameter,
+        while max_completion_tokens is accepted by both those and the older
+        gpt-4o family — so there is one correct spelling, not two.
+        """
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="hi"))]
+        )
+        mock_openai.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.OPENAI,
+            model="gpt-5.4-nano",
+            openai_api_key="test-key",
+            max_tokens=64,
+        )
+        OpenAIProvider(config).invoke("test prompt")
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["max_completion_tokens"] == 64
+        assert "max_tokens" not in kwargs
+
 
 class TestVertexAIProvider:
     """Tests for VertexAIProvider."""
