@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from reusable_llm_provider.providers import (
     LLMGenerationError,
+    LLMProviderGenerationError,
     StructuredOutputStrategy,
     StructuredOutputValidationError,
     AnthropicProvider,
@@ -348,6 +349,96 @@ class TestOpenAIProvider:
         kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert kwargs["max_completion_tokens"] == 64
         assert "max_tokens" not in kwargs
+
+
+class TestEmptyOutputIsAnError:
+    """invoke() must never hand back a non-answer.
+
+    Reasoning models share the token budget between thinking and output, so a
+    long thinking pass can exhaust it before any text is produced. Providers
+    signal that differently and neither shape is a usable string.
+    """
+
+    @staticmethod
+    def _thinking_block():
+        block = Mock()
+        block.type = "thinking"
+        del block.text
+        return block
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_anthropic_all_thinking_response_raises(self, mock_anthropic):
+        """Anthropic returns only a thinking block; joining yields ''."""
+        mock_client = Mock()
+        mock_client.messages.create.return_value = Mock(
+            content=[self._thinking_block()]
+        )
+        mock_anthropic.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC,
+            model="claude-opus-5",
+            anthropic_api_key="test-key",
+        )
+
+        with pytest.raises(LLMProviderGenerationError) as exc_info:
+            AnthropicProvider(config).invoke("test prompt")
+        assert exc_info.value.provider == "anthropic"
+
+    @patch("reusable_llm_provider.providers.genai")
+    def test_vertex_none_text_raises(self, mock_genai):
+        """Vertex sets .text to None when the budget ran out before output."""
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = Mock(text=None)
+        mock_genai.Client.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.VERTEX,
+            model="gemini-2.5-flash",
+            vertex_project_id="my-project",
+            vertex_location="us-central1",
+        )
+
+        with pytest.raises(LLMProviderGenerationError) as exc_info:
+            VertexAIProvider(config).invoke("test prompt")
+        assert exc_info.value.provider == "vertex"
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_whitespace_only_response_raises(self, mock_anthropic):
+        """Whitespace is not output either."""
+        block = Mock()
+        block.type = "text"
+        block.text = "   \n  "
+        mock_client = Mock()
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC,
+            model="claude-opus-5",
+            anthropic_api_key="test-key",
+        )
+
+        with pytest.raises(LLMProviderGenerationError):
+            AnthropicProvider(config).invoke("test prompt")
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_ordinary_text_is_returned_unchanged(self, mock_anthropic):
+        """Surrounding whitespace in a real answer must survive."""
+        block = Mock()
+        block.type = "text"
+        block.text = "  The sky is blue.\n"
+        mock_client = Mock()
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC,
+            model="claude-haiku-4-5-20251001",
+            anthropic_api_key="test-key",
+        )
+
+        assert AnthropicProvider(config).invoke("p") == "  The sky is blue.\n"
 
 
 class TestVertexAIProvider:
