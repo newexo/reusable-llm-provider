@@ -7,7 +7,7 @@ environment variables via the create_*_config convenience functions.
 
 import os
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
@@ -39,6 +39,7 @@ class LLMConfig:
         model: str,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        thinking: Optional[Union[str, int]] = None,
         anthropic_api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,
         openai_organization: Optional[str] = None,
@@ -59,17 +60,47 @@ class LLMConfig:
         self.temperature = temperature
         self.max_tokens = max_tokens if max_tokens is not None else 1000
 
+        # None means "do not send a thinking parameter at all", and is the
+        # default. It keeps existing callers byte-identical and lets each
+        # provider apply its own default.
+        #
+        # Disabling by default was considered and rejected: the off switch is
+        # itself refused by some models. reasoning_effort="none" is a 400 on
+        # gpt-4o and gpt-4o-mini, so sending it unconditionally would break
+        # those callers the same way sending temperature once broke the
+        # newest ones.
+        #
+        # "auto" is accepted and currently behaves exactly like None, because
+        # no provider needs an explicit "you decide" signal. It exists so a
+        # caller can record the intent, and is deliberately NOT mapped to
+        # Anthropic's "adaptive", which claude-haiku-4-5 rejects.
+        self.thinking = self._validate_thinking(thinking)
+
         self.anthropic_api_key = anthropic_api_key
         self.openai_api_key = openai_api_key
         self.openai_organization = openai_organization
         self.vertex_project_id = vertex_project_id
         self.vertex_location = vertex_location
 
+    @staticmethod
+    def _validate_thinking(value):
+        """Accept None, "off", "auto", or a positive token budget."""
+        if value is None or value in ("off", "auto"):
+            return value
+        # bool is a subclass of int; True is not a token budget.
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        raise ValueError(
+            f"Invalid thinking value {value!r}. Expected None, 'off', 'auto', "
+            "or a positive integer token budget."
+        )
+
 
 def create_anthropic_config(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    thinking: Optional[Union[str, int]] = None,
 ) -> LLMConfig:
     """Create Anthropic configuration from environment variables."""
     if model is None:
@@ -79,6 +110,7 @@ def create_anthropic_config(
         provider=LLMProviderType.ANTHROPIC,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=thinking,
         model=model,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
     )
@@ -88,6 +120,7 @@ def create_openai_config(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    thinking: Optional[Union[str, int]] = None,
 ) -> LLMConfig:
     """Create OpenAI configuration from environment variables."""
     if model is None:
@@ -97,6 +130,7 @@ def create_openai_config(
         provider=LLMProviderType.OPENAI,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=thinking,
         model=model,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_organization=os.getenv("OPENAI_ORGANIZATION"),
@@ -107,6 +141,7 @@ def create_vertex_config(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    thinking: Optional[Union[str, int]] = None,
 ) -> LLMConfig:
     """Create Vertex AI configuration from environment variables."""
     if model is None:
@@ -116,6 +151,7 @@ def create_vertex_config(
         provider=LLMProviderType.VERTEX,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=thinking,
         model=model,
         vertex_project_id=os.getenv("VERTEX_PROJECT_ID"),
         vertex_location=os.getenv("VERTEX_LOCATION"),
@@ -126,6 +162,7 @@ def create_ollama_config(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
+    thinking: Optional[Union[str, int]] = None,
 ) -> LLMConfig:
     """Create Ollama configuration from environment variables."""
     if model is None:
@@ -135,5 +172,6 @@ def create_ollama_config(
         provider=LLMProviderType.OLLAMA,
         temperature=temperature,
         max_tokens=max_tokens,
+        thinking=thinking,
         model=model,
     )

@@ -112,3 +112,63 @@ def test_explicit_temperature_still_rejected_by_these_models(model):
     provider = create_provider(create_anthropic_config(model=model, temperature=0.0))
     with pytest.raises(LLMGenerationError):
         provider.invoke(STRUCTURED_PROMPT)
+
+
+# The thinking control. These make live calls with a token budget sized for the
+# OUTPUT ALONE, which is the condition the feature exists for. A short prompt
+# provokes little thinking and passes either way, so the prompt below is chosen
+# to provoke reasoning -- a smoke test here would prove nothing.
+
+REASONING_PROMPT = (
+    "Three switches outside a windowless room control three bulbs inside. "
+    "You may flip switches freely but may enter the room only once. "
+    "Explain how to determine which switch controls which bulb."
+)
+
+
+@pytest.mark.parametrize("provider_fixture", PROVIDER_FIXTURES)
+def test_thinking_off_still_returns_text(provider_fixture, request):
+    """thinking='off' must not break any provider that ignores or honours it."""
+    provider = request.getfixturevalue(provider_fixture)
+    provider.thinking = "off"
+    result = provider.invoke(SIMPLE_PROMPT)
+
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_thinking_off_produces_output_within_an_output_sized_budget():
+    """The reported failure, inverted.
+
+    With thinking left to the provider, a Claude 5 model spends a tight budget
+    reasoning and returns a stub or nothing at all. Asking it not to reason
+    must produce usable text from the same budget.
+
+    Asserts only that text comes back -- not that it is longer than the
+    thinking case, which is true but varies per call and would make this race.
+    """
+    from reusable_llm_provider.config import create_anthropic_config
+    from reusable_llm_provider.providers import create_provider
+
+    config = create_anthropic_config(
+        model="claude-opus-5", max_tokens=300, thinking="off"
+    )
+    result = create_provider(config).invoke(REASONING_PROMPT)
+
+    assert isinstance(result, str)
+    assert len(result.split()) > 40
+
+
+def test_integer_budget_fails_loudly_on_a_model_that_rejects_budgets():
+    """Claude 5 rejects the budget form; that must surface, not be swallowed.
+
+    The library deliberately keeps no model-capability table, so this is the
+    provider's own 400 arriving as a wrapped generation error rather than a
+    silently dropped parameter.
+    """
+    from reusable_llm_provider.config import create_anthropic_config
+    from reusable_llm_provider.providers import LLMGenerationError, create_provider
+
+    config = create_anthropic_config(model="claude-opus-5", thinking=2048)
+    with pytest.raises(LLMGenerationError):
+        create_provider(config).invoke(SIMPLE_PROMPT)

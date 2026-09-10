@@ -176,6 +176,7 @@ class BaseLLMProvider(ABC):
         self.model = config.model
         self.max_tokens = config.max_tokens
         self.temperature = config.temperature
+        self.thinking = config.thinking
 
     def _sampling(self, key: str = "temperature") -> dict:
         """Keyword arguments for sampling, empty when temperature is unset.
@@ -187,6 +188,20 @@ class BaseLLMProvider(ABC):
         if self.temperature is None:
             return {}
         return {key: self.temperature}
+
+    def _reject_thinking_budget(self, accepted: str) -> None:
+        """Refuse an integer budget where the provider has no such concept.
+
+        Raised at construction rather than at request time so a caller finds
+        out before spending anything. Silently degrading to a nearby value
+        would invent a precision the API does not offer, and silently ignoring
+        it is the failure mode that made temperature expensive to diagnose.
+        """
+        if isinstance(self.thinking, int):
+            raise ValueError(
+                f"The {self.NAME} backend does not accept a thinking token "
+                f"budget. Use {accepted} instead."
+            )
 
     @contextmanager
     def _wrap_errors(self):
@@ -328,7 +343,23 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
             api_key=config.anthropic_api_key,
             max_tokens=self.max_tokens,
             **self._sampling(),
+            **self._thinking(),
         )
+
+    def _thinking(self) -> dict:
+        """Anthropic's thinking block, or nothing.
+
+        The accepted shape differs by generation and the library does not try
+        to know which model is which: "disabled" is accepted by both Claude 4.5
+        and Claude 5, while a budget is accepted only by 4.5 and "adaptive"
+        only by 5. A rejected shape surfaces as the provider's own 400, which
+        names the alternative.
+        """
+        if self.thinking == "off":
+            return {"thinking": {"type": "disabled"}}
+        if isinstance(self.thinking, int):
+            return {"thinking": {"type": "enabled", "budget_tokens": self.thinking}}
+        return {}
 
     def _invoke_raw_text(self, prompt: str) -> str:
         response = self.client.messages.create(
@@ -336,6 +367,7 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
             max_tokens=self.max_tokens,
             messages=[{"role": "user", "content": prompt}],
             **self._sampling(),
+            **self._thinking(),
         )
         return "\n\n".join(
             block.text for block in response.content if block.type == "text"
@@ -358,17 +390,32 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             api_key=config.openai_api_key,
             organization=config.openai_organization,
         )
+        self._reject_thinking_budget("thinking='off' or thinking='auto'")
         self.chat_model = ChatOpenAI(
             model=self.model,
             api_key=config.openai_api_key,
             organization=config.openai_organization,
             max_tokens=self.max_tokens,
             **self._sampling(),
+            **self._thinking(),
         )
+
+    def _thinking(self) -> dict:
+        """OpenAI's reasoning effort, or nothing.
+
+        The control is a categorical effort level with no token-budget form,
+        which is why an integer is refused rather than approximated. Note the
+        parameter is unknown to the gpt-4o family, which rejects it with a 400
+        -- so it is sent only when the caller asks for it.
+        """
+        if self.thinking == "off":
+            return {"reasoning_effort": "none"}
+        return {}
 
     def _invoke_raw_text(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
+            **self._thinking(),
             # Not max_tokens: GPT-5 models reject that outright, and
             # max_completion_tokens is accepted by the older gpt-4o family too.
             max_completion_tokens=self.max_tokens,
@@ -406,6 +453,7 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             location=config.vertex_location,
             vertexai=True,
             max_output_tokens=self.max_tokens,
+            **self._thinking_langchain(),
             # Passed explicitly rather than splatted via ``_sampling()``.
             # ChatGoogleGenerativeAI defaults temperature to 0.7 and sends it,
             # so simply omitting the argument would start applying a sampling
@@ -414,10 +462,35 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
             temperature=self.temperature,
         )
 
+    def _thinking_budget(self) -> int | None:
+        """The Gemini thinking budget in tokens, or None to send nothing.
+
+        Gemini expresses the control as a token count, so both "off" and an
+        explicit budget map onto it directly -- 0 disables thinking.
+        """
+        if self.thinking == "off":
+            return 0
+        if isinstance(self.thinking, int):
+            return self.thinking
+        return None
+
+    def _thinking(self) -> dict:
+        budget = self._thinking_budget()
+        if budget is None:
+            return {}
+        return {"thinking_config": types.ThinkingConfig(thinking_budget=budget)}
+
+    def _thinking_langchain(self) -> dict:
+        budget = self._thinking_budget()
+        if budget is None:
+            return {}
+        return {"thinking_budget": budget}
+
     def _invoke_raw_text(self, prompt: str) -> str:
         request_config = types.GenerateContentConfig(
             max_output_tokens=self.max_tokens,
             **self._sampling(),
+            **self._thinking(),
         )
         response = self.client.models.generate_content(
             model=self.model,
@@ -438,8 +511,22 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        self.llm = OllamaLLM(model=config.model, **self._sampling())
-        self.chat_model = ChatOllama(model=config.model, **self._sampling())
+        self._reject_thinking_budget("thinking='off' or thinking='auto'")
+        self.llm = OllamaLLM(model=config.model, **self._sampling(), **self._thinking())
+        self.chat_model = ChatOllama(
+            model=config.model, **self._sampling(), **self._thinking()
+        )
+
+    def _thinking(self) -> dict:
+        """Ollama's reasoning toggle, or nothing.
+
+        Support is per-model and the server says so plainly -- gemma2 rejects
+        think=true with "does not support thinking" while accepting false --
+        so no capability table is kept here.
+        """
+        if self.thinking == "off":
+            return {"reasoning": False}
+        return {}
 
     def _invoke_raw_text(self, prompt: str) -> str:
         return self.llm.invoke(prompt)
