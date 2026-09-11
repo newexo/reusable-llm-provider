@@ -203,7 +203,7 @@ class TestAnthropicProvider:
         provider = AnthropicProvider(config)
         assert provider.model == "claude-3-haiku"
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_wraps_api_errors(self, mock_anthropic):
         """Test that invoke wraps API errors properly."""
         mock_client = Mock()
@@ -239,7 +239,7 @@ class TestAnthropicProvider:
             block.text = text
         return block
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_skips_thinking_blocks(self, mock_anthropic):
         """Extended thinking puts a non-text block first; invoke must skip it.
 
@@ -264,7 +264,7 @@ class TestAnthropicProvider:
 
         assert AnthropicProvider(config).invoke("test prompt") == "The sky is blue."
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_joins_multiple_text_blocks(self, mock_anthropic):
         """All text blocks are returned, not just the first.
 
@@ -305,7 +305,7 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(config)
         assert provider.model == "gpt-4o-mini"
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_invoke_wraps_api_errors(self, mock_openai):
         """Test that invoke wraps API errors properly."""
         mock_client = Mock()
@@ -324,7 +324,7 @@ class TestOpenAIProvider:
 
         assert exc_info.value.provider == "openai"
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_invoke_uses_max_completion_tokens(self, mock_openai):
         """The token cap must be sent as max_completion_tokens.
 
@@ -366,7 +366,7 @@ class TestEmptyOutputIsAnError:
         del block.text
         return block
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_all_thinking_response_raises(self, mock_anthropic):
         """Anthropic returns only a thinking block; joining yields ''."""
         mock_client = Mock()
@@ -385,7 +385,7 @@ class TestEmptyOutputIsAnError:
             AnthropicProvider(config).invoke("test prompt")
         assert exc_info.value.provider == "anthropic"
 
-    @patch("reusable_llm_provider.providers.genai")
+    @patch("google.genai")
     def test_vertex_none_text_raises(self, mock_genai):
         """Vertex sets .text to None when the budget ran out before output."""
         mock_client = Mock()
@@ -403,7 +403,7 @@ class TestEmptyOutputIsAnError:
             VertexAIProvider(config).invoke("test prompt")
         assert exc_info.value.provider == "vertex"
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_whitespace_only_response_raises(self, mock_anthropic):
         """Whitespace is not output either."""
         block = Mock()
@@ -422,7 +422,7 @@ class TestEmptyOutputIsAnError:
         with pytest.raises(LLMProviderGenerationError):
             AnthropicProvider(config).invoke("test prompt")
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_ordinary_text_is_returned_unchanged(self, mock_anthropic):
         """Surrounding whitespace in a real answer must survive."""
         block = Mock()
@@ -529,7 +529,7 @@ class TestThinkingControl:
 
     # --- the regression guard for existing callers -----------------------
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_unset_sends_no_thinking_parameter(self, mock_anthropic):
         """Default must leave the request byte-identical to 0.5.1."""
         mock_client = Mock()
@@ -546,7 +546,7 @@ class TestThinkingControl:
 
         assert "thinking" not in mock_client.messages.create.call_args.kwargs
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_auto_also_sends_nothing(self, mock_anthropic):
         """'auto' records intent; no provider needs an explicit signal for it.
 
@@ -569,7 +569,7 @@ class TestThinkingControl:
 
     # --- per-provider mapping -------------------------------------------
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_off(self, mock_anthropic):
         mock_client = Mock()
         block = Mock()
@@ -586,7 +586,7 @@ class TestThinkingControl:
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "disabled"}
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_budget(self, mock_anthropic):
         mock_client = Mock()
         block = Mock()
@@ -606,7 +606,7 @@ class TestThinkingControl:
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 2048}
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_off(self, mock_openai):
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = Mock(

@@ -23,14 +23,6 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Protocol, Type
 
-from anthropic import Anthropic
-from google import genai
-from google.genai import types
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import ChatOllama, OllamaLLM
-from langchain_openai import ChatOpenAI
-from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, LLMProviderType
@@ -336,6 +328,9 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "function_calling"
 
     def __init__(self, config: LLMConfig):
+        from anthropic import Anthropic
+        from langchain_anthropic import ChatAnthropic
+
         super().__init__(config)
         self.client = Anthropic(api_key=config.anthropic_api_key)
         self.chat_model = ChatAnthropic(
@@ -385,6 +380,9 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
+        from langchain_openai import ChatOpenAI
+        from openai import OpenAI
+
         super().__init__(config)
         self.client = OpenAI(
             api_key=config.openai_api_key,
@@ -440,6 +438,10 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
+        from google import genai
+        from google.genai import types
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
         super().__init__(config)
         self.client = genai.Client(
             vertexai=True,
@@ -475,6 +477,8 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         return None
 
     def _thinking(self) -> dict:
+        from google.genai import types
+
         budget = self._thinking_budget()
         if budget is None:
             return {}
@@ -487,6 +491,8 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         return {"thinking_budget": budget}
 
     def _invoke_raw_text(self, prompt: str) -> str:
+        from google.genai import types
+
         request_config = types.GenerateContentConfig(
             max_output_tokens=self.max_tokens,
             **self._sampling(),
@@ -510,6 +516,8 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
     STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
 
     def __init__(self, config: LLMConfig):
+        from langchain_ollama import ChatOllama, OllamaLLM
+
         super().__init__(config)
         self._reject_thinking_budget("thinking='off' or thinking='auto'")
         self.llm = OllamaLLM(model=config.model, **self._sampling(), **self._thinking())
