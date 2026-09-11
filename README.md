@@ -78,6 +78,45 @@ config = LLMConfig(
 )
 ```
 
+### Controlling Reasoning
+
+Reasoning models spend `max_tokens` on thinking *and* output from one shared
+budget. A caller who sizes `max_tokens` for the expected output can therefore
+receive a truncated answer, or none at all, because the model spent the budget
+reasoning first.
+
+The `thinking` parameter controls this:
+
+| Value | Meaning |
+|-------|---------|
+| `None` (default) | Send nothing; the provider's own default applies |
+| `"off"` | Ask the provider not to reason |
+| `"auto"` | Let the provider decide |
+| a positive `int` | A reasoning token budget, where the provider accepts one |
+
+```python
+# Sized for the output alone, with reasoning turned off
+config = create_anthropic_config(
+    model="claude-opus-5", max_tokens=300, thinking="off"
+)
+```
+
+The default is `None`, so existing callers are unaffected. Disabling by default
+was considered and rejected: the off switch is itself refused by some models
+(`reasoning_effort` is a 400 on `gpt-4o` and `gpt-4o-mini`), so sending it
+unconditionally would break those callers.
+
+Support varies **by model, not just by provider** — and so does the shape of
+the parameter. `claude-opus-5` accepts `"off"` and `"auto"` but rejects an
+integer budget; `claude-haiku-4-5` accepts `"off"` and a budget but rejects
+`"auto"`. The library keeps no capability table and does not guess: it sends
+what you ask for and lets the provider's own error reach you, which names the
+alternative. An integer budget is refused up front for OpenAI and Ollama, whose
+controls have no token-budget form at all.
+
+`"auto"` currently behaves exactly like `None`, because no provider requires an
+explicit "you decide" signal. It exists so intent can be recorded in code.
+
 ## Usage
 
 ```python
@@ -213,4 +252,6 @@ reusable-llm-provider/
 - **No framework leakage.** LangChain, when used internally, is treated as one possible adapter. Its result shapes (`{"parsed", "raw", "parsing_error"}`, parser objects, method-specific naming) do not appear in the public interface.
 - **Protocol-based interface.** `LLMProvider` is a `typing.Protocol`, so adapters to additional backends do not need to inherit from a shared class.
 - **No implicit global state.** The package does not read environment variables, configuration files, or secret stores of its own accord.
+- **Neutral vocabulary over passthrough.** Where a control diverges across providers — `temperature`, `thinking` — the public parameter is provider-neutral and each provider maps it. A passthrough would push per-provider branching into every caller, which is the thing this library exists to prevent.
+- **Unset means absent, not null.** Optional controls default to `None` and are omitted from the request entirely. Several providers reject parameters their newer models no longer support, so sending a default value makes those models unusable.
 - **Thin wrapper.** The abstraction is intentionally minimal. It unifies construction and invocation, but does not attempt to normalize provider-specific features such as streaming or multimodal inputs.

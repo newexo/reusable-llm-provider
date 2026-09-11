@@ -511,3 +511,132 @@ class TestSamplingOmission:
 
     def test_key_can_be_renamed_for_providers_that_differ(self):
         assert self._provider(0.5)._sampling("temp") == {"temp": 0.5}
+
+
+class TestThinkingControl:
+    """`thinking` maps onto each provider's own shape, or raises.
+
+    The shapes are not merely differently named: Anthropic takes a typed
+    object, OpenAI a categorical effort level with no token budget at all, and
+    the accepted shape differs between generations of the same vendor. So the
+    mapping lives in the provider classes, and the assertions are on the
+    request kwargs — absent-versus-null is invisible further down.
+    """
+
+    @staticmethod
+    def _cfg(provider, model, thinking, **kw):
+        return LLMConfig(provider=provider, model=model, thinking=thinking, **kw)
+
+    # --- the regression guard for existing callers -----------------------
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_unset_sends_no_thinking_parameter(self, mock_anthropic):
+        """Default must leave the request byte-identical to 0.5.1."""
+        mock_client = Mock()
+        block = Mock()
+        block.type = "text"
+        block.text = "hi"
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        cfg = self._cfg(
+            LLMProviderType.ANTHROPIC, "claude-opus-5", None, anthropic_api_key="k"
+        )
+        AnthropicProvider(cfg).invoke("p")
+
+        assert "thinking" not in mock_client.messages.create.call_args.kwargs
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_auto_also_sends_nothing(self, mock_anthropic):
+        """'auto' records intent; no provider needs an explicit signal for it.
+
+        It deliberately does not map to Anthropic's 'adaptive', which is
+        rejected by claude-haiku-4-5, the library's default Anthropic model.
+        """
+        mock_client = Mock()
+        block = Mock()
+        block.type = "text"
+        block.text = "hi"
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        cfg = self._cfg(
+            LLMProviderType.ANTHROPIC, "claude-opus-5", "auto", anthropic_api_key="k"
+        )
+        AnthropicProvider(cfg).invoke("p")
+
+        assert "thinking" not in mock_client.messages.create.call_args.kwargs
+
+    # --- per-provider mapping -------------------------------------------
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_anthropic_off(self, mock_anthropic):
+        mock_client = Mock()
+        block = Mock()
+        block.type = "text"
+        block.text = "hi"
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        cfg = self._cfg(
+            LLMProviderType.ANTHROPIC, "claude-opus-5", "off", anthropic_api_key="k"
+        )
+        AnthropicProvider(cfg).invoke("p")
+
+        kwargs = mock_client.messages.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "disabled"}
+
+    @patch("reusable_llm_provider.providers.Anthropic")
+    def test_anthropic_budget(self, mock_anthropic):
+        mock_client = Mock()
+        block = Mock()
+        block.type = "text"
+        block.text = "hi"
+        mock_client.messages.create.return_value = Mock(content=[block])
+        mock_anthropic.return_value = mock_client
+
+        cfg = self._cfg(
+            LLMProviderType.ANTHROPIC,
+            "claude-haiku-4-5-20251001",
+            2048,
+            anthropic_api_key="k",
+        )
+        AnthropicProvider(cfg).invoke("p")
+
+        kwargs = mock_client.messages.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+
+    @patch("reusable_llm_provider.providers.OpenAI")
+    def test_openai_off(self, mock_openai):
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="hi"))]
+        )
+        mock_openai.return_value = mock_client
+
+        cfg = self._cfg(
+            LLMProviderType.OPENAI, "gpt-5.4-nano", "off", openai_api_key="k"
+        )
+        OpenAIProvider(cfg).invoke("p")
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning_effort"] == "none"
+
+    def test_openai_rejects_a_token_budget(self):
+        """OpenAI's control is a categorical effort level, not a token count.
+
+        Inventing a mapping would fabricate precision the API does not offer,
+        so this raises rather than guessing.
+        """
+        cfg = self._cfg(
+            LLMProviderType.OPENAI, "gpt-5.4-nano", 2048, openai_api_key="k"
+        )
+        with pytest.raises(ValueError) as exc_info:
+            OpenAIProvider(cfg)
+        assert "openai" in str(exc_info.value).lower()
+
+    def test_ollama_rejects_a_token_budget(self):
+        cfg = self._cfg(LLMProviderType.OLLAMA, "gemma2", 2048)
+        with pytest.raises(ValueError) as exc_info:
+            OllamaProvider(cfg)
+        assert "ollama" in str(exc_info.value).lower()

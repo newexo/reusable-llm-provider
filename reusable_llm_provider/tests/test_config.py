@@ -1,5 +1,7 @@
 """Tests for configuration management."""
 
+import pytest
+
 from reusable_llm_provider.config import (
     LLMConfig,
     LLMProviderType,
@@ -153,3 +155,27 @@ class TestProviderType:
         )
         assert config.provider == LLMProviderType.ANTHROPIC
         assert config.provider != LLMProviderType.OPENAI
+
+
+class TestThinkingVocabulary:
+    """`thinking` accepts a small neutral vocabulary and rejects the rest.
+
+    Validated at config construction so a typo fails before any request is
+    built, rather than surfacing as a provider rejection.
+    """
+
+    def test_default_is_none(self):
+        config = LLMConfig(provider=LLMProviderType.ANTHROPIC, model="m")
+        assert config.thinking is None
+
+    @pytest.mark.parametrize("value", [None, "off", "auto", 1024])
+    def test_accepted_values(self, value):
+        config = LLMConfig(
+            provider=LLMProviderType.ANTHROPIC, model="m", thinking=value
+        )
+        assert config.thinking == value
+
+    @pytest.mark.parametrize("value", ["on", "disabled", "", 0, -1, True, 1.5])
+    def test_rejected_values(self, value):
+        with pytest.raises(ValueError):
+            LLMConfig(provider=LLMProviderType.ANTHROPIC, model="m", thinking=value)
