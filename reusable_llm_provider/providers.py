@@ -21,14 +21,17 @@ in local type safety rather than provider promises.
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Protocol, Type
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, LLMProviderType
 
 
-class StructuredOutputStrategy(str, Enum):
+# noqa on UP042: switching to enum.StrEnum would change str(member) from
+# "StructuredOutputStrategy.LANGCHAIN_MEDIATED" to "langchain_mediated" on a
+# public type. That is a behaviour change, not a tooling change.
+class StructuredOutputStrategy(str, Enum):  # noqa: UP042
     """How a provider attempts to produce structured output.
 
     These are interchangeable internal strategies. The public
@@ -95,7 +98,7 @@ class StructuredOutputValidationError(LLMGenerationError):
     def __init__(
         self,
         provider: str,
-        output_model: Type[BaseModel],
+        output_model: type[BaseModel],
         strategy: StructuredOutputStrategy,
         validation_error: Exception,
         raw: Any = None,
@@ -157,7 +160,7 @@ class LLMProvider(Protocol):
         ...
 
     def invoke_structured(
-        self, prompt: str, output_model: Type[BaseModel]
+        self, prompt: str, output_model: type[BaseModel]
     ) -> BaseModel:
         """Generate a typed result conforming to ``output_model``.
 
@@ -259,7 +262,7 @@ class BaseLLMProvider(ABC):
         return text
 
     def invoke_structured(
-        self, prompt: str, output_model: Type[BaseModel]
+        self, prompt: str, output_model: type[BaseModel]
     ) -> BaseModel:
         with self._wrap_errors():
             candidate, raw = self._invoke_structured_candidate(prompt, output_model)
@@ -268,7 +271,7 @@ class BaseLLMProvider(ABC):
     def _validate_candidate(
         self,
         candidate: Any,
-        output_model: Type[BaseModel],
+        output_model: type[BaseModel],
         raw: Any,
     ) -> BaseModel:
         """Run mandatory local Pydantic validation on ``candidate``.
@@ -315,7 +318,7 @@ class BaseLLMProvider(ABC):
 
     @abstractmethod
     def _invoke_structured_candidate(
-        self, prompt: str, output_model: Type[BaseModel]
+        self, prompt: str, output_model: type[BaseModel]
     ) -> tuple[Any, Any]:
         """Return ``(candidate, raw)`` from the provider.
 
@@ -340,7 +343,7 @@ class _LangChainStructuredMixin:
         raise NotImplementedError
 
     def _invoke_structured_candidate(
-        self, prompt: str, output_model: Type[BaseModel]
+        self, prompt: str, output_model: type[BaseModel]
     ) -> tuple[Any, Any]:
         chat_model = self._structured_model()
         kwargs = {"include_raw": True}
