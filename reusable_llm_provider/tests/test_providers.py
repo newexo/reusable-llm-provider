@@ -7,6 +7,9 @@ from pydantic import BaseModel
 
 from reusable_llm_provider.providers import (
     LLMGenerationError,
+    MissingBackendError,
+    _PROVIDER_MAP,
+    _requires_extra,
     LLMProviderGenerationError,
     StructuredOutputStrategy,
     StructuredOutputValidationError,
@@ -640,3 +643,54 @@ class TestThinkingControl:
         with pytest.raises(ValueError) as exc_info:
             OllamaProvider(cfg)
         assert "ollama" in str(exc_info.value).lower()
+
+
+class TestMissingBackendExtra:
+    """A backend whose extra is not installed must say which extra to install.
+
+    The bare failure names the missing *package* (``langchain_openai``),
+    which is not the name of the *extra* (``openai``) a caller would have to
+    install -- so the one identifier in the message is the one that does not
+    help.
+    """
+
+    def test_missing_extra_names_the_extra_and_the_install_spec(self):
+        with pytest.raises(MissingBackendError) as exc_info:
+            with _requires_extra("openai"):
+                raise ModuleNotFoundError("No module named 'langchain_openai'")
+
+        message = str(exc_info.value)
+        assert "openai" in message
+        assert "reusable-llm-provider[openai]" in message
+
+    def test_missing_extra_chains_the_underlying_import_error(self):
+        original = ModuleNotFoundError("No module named 'langchain_openai'")
+        with pytest.raises(MissingBackendError) as exc_info:
+            with _requires_extra("openai"):
+                raise original
+
+        assert exc_info.value.__cause__ is original
+
+    def test_missing_backend_error_is_an_import_error(self):
+        """Callers already handling a bare ImportError keep working."""
+        assert issubclass(MissingBackendError, ImportError)
+
+    def test_unrelated_errors_pass_through(self):
+        with pytest.raises(ValueError):
+            with _requires_extra("openai"):
+                raise ValueError("not an import problem")
+
+    def test_declared_extras_match_the_provider_names(self):
+        """The message is built from ``NAME``, so the two must not drift.
+
+        A provider named ``vertex`` whose extra is spelled ``vertexai`` would
+        print an install command that does not work.
+        """
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        declared = set(tomllib.loads(pyproject.read_text())["tool"]["poetry"]["extras"])
+        names = {cls.NAME for cls in _PROVIDER_MAP.values()}
+
+        assert declared == names | {"all"}
