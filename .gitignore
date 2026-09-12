@@ -137,3 +137,6 @@ dmypy.json
 # Secrets (keep only the README)
 secrets/*
 !secrets/README.md
+
+.ruff_cache/
+.wheeltest/

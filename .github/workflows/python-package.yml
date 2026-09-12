@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [ "template", "main" ]
 
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref instead of paying for both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
@@ -16,28 +24,37 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
-        version: 2.3.4
+        version: 2.4.3
         virtualenvs-create: true
-        virtualenvs-in-project: false
+        # In-project so the virtualenv can be cached by path below. Local
+        # development uses a conda environment and is unaffected by this.
+        virtualenvs-in-project: true
 
+    - name: Restore cached virtualenv
+      uses: actions/cache@v6
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-py${{ matrix.python-version }}-all-${{ hashFiles('poetry.lock') }}
+
+    # --only main,dev is explicit so that adding an optional group later cannot
+    # silently start installing it in CI. --all-extras is required rather than
+    # optional here: the unit suite mocks vendor symbols such as
+    # anthropic.Anthropic, so the real packages must be importable.
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        poetry install --all-extras --with dev
+      run: poetry install --only main,dev --all-extras
 
-    # Optional: run formatting only as feedback (not required for CI pass)
-    # - name: Format code
-    #   run: make format
+    - name: Check formatting
+      run: make format-check
 
     - name: Lint
       run: make lint
@@ -48,13 +65,26 @@ jobs:
     - name: Coverage check
       run: make coverage
 
-    - name: Backends stay lazy with every extra installed
-      run: poetry run python scripts/check_extras.py anthropic openai vertex ollama
+    - name: Optional dependency boundaries
+      run: make import-boundaries
 
-  # The suites above run where every backend is installed, so they pass whether
-  # or not the optional-dependency machinery works. These two jobs are the ones
-  # that can actually fail when it breaks: they build environments that really
-  # are missing backends, rather than simulating absence with mocks.
+    - name: Dependency declarations
+      run: make deps-check
+
+    # With every extra installed this can only catch a vendor import that has
+    # moved back to module scope -- which is precisely the case the jobs below
+    # cannot see.
+    - name: Backends stay lazy with every extra installed
+      run: make check-extras
+
+    # Builds a wheel and runs the shipped tests against the installed package,
+    # catching packaging errors that a source-tree test run cannot see.
+    - name: Test the built wheel
+      run: make test-wheel
+
+  # The job above runs where every backend is installed, so it passes whether or
+  # not the optional-dependency machinery works. These two build environments
+  # that really are missing backends, rather than simulating absence with mocks.
   extras:
     name: extra:${{ matrix.extra }}
     runs-on: ubuntu-latest
@@ -64,19 +94,19 @@ jobs:
         extra: ["anthropic", "openai", "vertex", "ollama"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v7
       with:
         python-version: "3.13"
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
-        version: 2.3.4
+        version: 2.4.3
         virtualenvs-create: true
-        virtualenvs-in-project: false
+        virtualenvs-in-project: true
 
     - name: Install only this extra
       run: poetry install --only main --extras ${{ matrix.extra }}
@@ -89,19 +119,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v7
       with:
         python-version: "3.13"
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
-        version: 2.3.4
+        version: 2.4.3
         virtualenvs-create: true
-        virtualenvs-in-project: false
+        virtualenvs-in-project: true
 
     - name: Install with no extras
       run: poetry install --only main

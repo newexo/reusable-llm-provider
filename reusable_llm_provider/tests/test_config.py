@@ -3,13 +3,13 @@
 import pytest
 
 from reusable_llm_provider.config import (
+    DEFAULT_MODELS,
     LLMConfig,
     LLMProviderType,
     create_anthropic_config,
+    create_ollama_config,
     create_openai_config,
     create_vertex_config,
-    create_ollama_config,
-    DEFAULT_MODELS,
 )
 
 

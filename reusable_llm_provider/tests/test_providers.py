@@ -1,24 +1,34 @@
 """Tests for LLM provider implementations."""
 
-import pytest
+# Every test here either patches a vendor symbol (`anthropic.Anthropic`) or
+# constructs a provider, and both require the real SDK to be importable. That
+# makes the whole module unrunnable against a bare install, which is the
+# supported install -- see test_packaging.py for what must hold without any
+# backend.
+
 from unittest.mock import Mock, patch
-from reusable_llm_provider.config import LLMConfig, LLMProviderType
+
+import pytest
 from pydantic import BaseModel
 
+from reusable_llm_provider import directories
+from reusable_llm_provider.config import LLMConfig, LLMProviderType
 from reusable_llm_provider.providers import (
-    LLMGenerationError,
-    MissingBackendError,
     _PROVIDER_MAP,
-    _requires_extra,
+    AnthropicProvider,
+    LLMGenerationError,
     LLMProviderGenerationError,
+    MissingBackendError,
+    OllamaProvider,
+    OpenAIProvider,
     StructuredOutputStrategy,
     StructuredOutputValidationError,
-    AnthropicProvider,
-    OpenAIProvider,
     VertexAIProvider,
-    OllamaProvider,
+    _requires_extra,
     create_provider,
 )
+
+pytestmark = pytest.mark.needs_backends
 
 
 class _Echo(BaseModel):
@@ -680,6 +690,10 @@ class TestMissingBackendExtra:
             with _requires_extra("openai"):
                 raise ValueError("not an import problem")
 
+    @pytest.mark.skipif(
+        not directories.base("pyproject.toml").exists(),
+        reason="pyproject.toml is not shipped; this can only run from a checkout",
+    )
     def test_declared_extras_match_the_provider_names(self):
         """The message is built from ``NAME``, so the two must not drift.
 
@@ -687,10 +701,9 @@ class TestMissingBackendExtra:
         print an install command that does not work.
         """
         import tomllib
-        from pathlib import Path
 
-        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-        declared = set(tomllib.loads(pyproject.read_text())["tool"]["poetry"]["extras"])
+        config = tomllib.loads(directories.base("pyproject.toml").read_text())
+        declared = set(config["project"]["optional-dependencies"])
         names = {cls.NAME for cls in _PROVIDER_MAP.values()}
 
         assert declared == names | {"all"}

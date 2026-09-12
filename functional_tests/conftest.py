@@ -8,12 +8,12 @@ import pytest
 
 from reusable_llm_provider.config import (
     create_anthropic_config,
+    create_ollama_config,
     create_openai_config,
     create_vertex_config,
-    create_ollama_config,
 )
-from reusable_llm_provider.providers import create_provider
 from reusable_llm_provider.env import load_reusable_llm_provider_env
+from reusable_llm_provider.providers import create_provider
 
 load_reusable_llm_provider_env()
 

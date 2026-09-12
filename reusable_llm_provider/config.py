@@ -7,7 +7,6 @@ environment variables via the create_*_config convenience functions.
 
 import os
 from enum import Enum
-from typing import Optional, Union
 
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
@@ -37,14 +36,14 @@ class LLMConfig:
         self,
         provider: LLMProviderType,
         model: str,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        thinking: Optional[Union[str, int]] = None,
-        anthropic_api_key: Optional[str] = None,
-        openai_api_key: Optional[str] = None,
-        openai_organization: Optional[str] = None,
-        vertex_project_id: Optional[str] = None,
-        vertex_location: Optional[str] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        thinking: str | int | None = None,
+        anthropic_api_key: str | None = None,
+        openai_api_key: str | None = None,
+        openai_organization: str | None = None,
+        vertex_project_id: str | None = None,
+        vertex_location: str | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -97,10 +96,10 @@ class LLMConfig:
 
 
 def create_anthropic_config(
-    model: Optional[str] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    thinking: Optional[Union[str, int]] = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    thinking: str | int | None = None,
 ) -> LLMConfig:
     """Create Anthropic configuration from environment variables."""
     if model is None:
@@ -117,10 +116,10 @@ def create_anthropic_config(
 
 
 def create_openai_config(
-    model: Optional[str] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    thinking: Optional[Union[str, int]] = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    thinking: str | int | None = None,
 ) -> LLMConfig:
     """Create OpenAI configuration from environment variables."""
     if model is None:
@@ -138,10 +137,10 @@ def create_openai_config(
 
 
 def create_vertex_config(
-    model: Optional[str] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    thinking: Optional[Union[str, int]] = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    thinking: str | int | None = None,
 ) -> LLMConfig:
     """Create Vertex AI configuration from environment variables."""
     if model is None:
@@ -159,10 +158,10 @@ def create_vertex_config(
 
 
 def create_ollama_config(
-    model: Optional[str] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-    thinking: Optional[Union[str, int]] = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    thinking: str | int | None = None,
 ) -> LLMConfig:
     """Create Ollama configuration from environment variables."""
     if model is None:

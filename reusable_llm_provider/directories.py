@@ -1,25 +1,41 @@
-import os
+from pathlib import Path
 
 
 def qualifyname(directoryname, filename=None):
+    directory = Path(directoryname)
     if filename is None:
-        return directoryname
-    return os.path.join(directoryname, filename)
+        return directory
+    return directory / filename
 
 
 def code(filename=None):
-    codepath = os.path.dirname(__file__)
-    return qualifyname(codepath, filename)
+    return qualifyname(Path(__file__).parent.resolve(), filename)
 
 
 def base(filename=None):
-    basepath = os.path.abspath(code(".."))
-    return qualifyname(basepath, filename)
+    return qualifyname(code().parent, filename)
+
+
+def data(filename=None):
+    return qualifyname(base("data"), filename)
+
+
+def package_data(filename=None):
+    return qualifyname(code("data"), filename)
 
 
 def tests(filename=None):
     return qualifyname(code("tests"), filename)
 
 
+def test_data(filename=None):
+    return qualifyname(tests("test_data"), filename)
+
+
 def secrets(filename=None):
+    """Repository-level secrets directory.
+
+    Addresses the checkout, not the installed package: `secrets/` is gitignored
+    and never ships. Only the functional tests read from it.
+    """
     return qualifyname(base("secrets"), filename)
