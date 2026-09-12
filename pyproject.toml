@@ -1,6 +1,6 @@
 [project]
 name = "reusable_llm_provider"
-version = "0.7.1"
+version = "0.8.0"
 description = "Reusable LLM provider abstraction layer supporting Anthropic, OpenAI, Vertex AI, and Ollama"
 authors = [{ name = "Reuben Brasher", email = "rkbrasher@gmail.com" }]
 license = "MIT"

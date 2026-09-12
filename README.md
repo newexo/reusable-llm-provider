@@ -35,13 +35,13 @@ Install from the GitHub repository using Poetry, naming the extras you need:
 
 ```toml
 [tool.poetry.dependencies]
-reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.7.1", extras = ["anthropic"]}
+reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.8.0", extras = ["anthropic"]}
 ```
 
 Or with pip:
 
 ```bash
-pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.7.1"
+pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.8.0"
 ```
 
 Several extras may be combined: `extras = ["anthropic", "ollama"]`. Use `all` if
