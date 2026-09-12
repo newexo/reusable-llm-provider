@@ -20,18 +20,53 @@ The Pydantic model is the public contract. Whether a backend reaches that result
 
 ## Installation
 
-Install from the GitHub repository using Poetry:
+**Backends are optional, and a bare install brings none.** Each vendor SDK lives
+behind an extra, so a consumer installs only the backend it uses:
+
+| Extra | Installs |
+|-------|----------|
+| `anthropic` | `anthropic`, `langchain-anthropic` |
+| `openai` | `openai`, `langchain-openai` |
+| `vertex` | `google-genai`, `langchain-google-genai` |
+| `ollama` | `langchain-ollama` |
+| `all` | all of the above |
+
+Install from the GitHub repository using Poetry, naming the extras you need:
 
 ```toml
 [tool.poetry.dependencies]
-reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", branch = "main"}
+reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.7.0", extras = ["anthropic"]}
 ```
 
 Or with pip:
 
 ```bash
-pip install git+https://github.com/newexo/reusable-llm-provider.git
+pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.7.0"
 ```
+
+Several extras may be combined: `extras = ["anthropic", "ollama"]`. Use `all` if
+the install size and startup cost do not matter to you — but prefer naming the
+backends you actually use, since that is the point of the extras.
+
+### Upgrading from 0.6.x
+
+This is a breaking change for installs that did not name an extra. Previously
+every vendor SDK was a hard dependency, so any install could reach any backend;
+now a backend that was not installed raises on construction:
+
+```
+MissingBackendError: The openai backend is not installed.
+Install this package as reusable-llm-provider[openai] to use it.
+```
+
+`MissingBackendError` subclasses `ImportError`, and the underlying
+`ModuleNotFoundError` is chained as its cause — it names the missing *package*,
+while the message names the *extra* to install. The fix is to add the extra to
+your dependency declaration.
+
+In exchange, importing the package no longer pays for SDKs you do not use:
+`import reusable_llm_provider.providers` went from **1.09 s to 0.06 s**, and an
+`[anthropic]`-only install is 68 MB against 123 MB for `[all]`.
 
 ## Configuration
 
@@ -157,6 +192,11 @@ All provider methods raise `LLMGenerationError` (or a subclass) on failure:
 | `StructuredOutputValidationError`  | Content was returned but did not validate against the requested model.  |
 | `LLMGenerationError`               | Base class; raised for any failure not classified above.                |
 
+These cover generation. A backend whose extra was never installed fails earlier
+than that — `create_provider` raises `MissingBackendError`, which subclasses
+`ImportError` rather than `LLMGenerationError`, because nothing was ever sent.
+See [Installation](#installation).
+
 `StructuredOutputValidationError` carries the provider name, the requested `output_model`, the `StructuredOutputStrategy` that was used, the underlying validation error, and the raw provider response when available:
 
 ```python
@@ -196,27 +236,57 @@ This project uses Poetry for dependency management.
 ### Environment Setup
 
 ```bash
-poetry install --with dev
+poetry install --all-extras --with dev
 ```
+
+The extras are needed for development even though they are optional for
+consumers: the unit suite patches vendor symbols such as `anthropic.Anthropic`,
+and the functional tests call the real SDKs.
 
 ### Commands
 
 | Command                | Description                                    |
 |------------------------|------------------------------------------------|
 | `make test`            | Run the unit test suite.                       |
-| `make functional-test` | Run live tests against real LLM providers.     |
+| `make test-functional` | Run live tests against real LLM providers.     |
 | `make format`          | Format the code with Ruff.                     |
 | `make lint`            | Run Ruff lint checks.                          |
 | `make check`           | Run formatting, linting, and tests.            |
 | `make coverage`        | Run tests with coverage enforcement.           |
 | `make coverage-html`   | Create an HTML coverage report.                |
 
+### Import Conventions
+
+Imports go at the top of the module. There are two deliberate exceptions, both
+of them inside a function body:
+
+- **Optional dependencies**, guarded so the absence is actionable. Each provider
+  imports its vendor SDK inside `__init__`, wrapped in `_requires_extra(...)`,
+  which turns a bare `ModuleNotFoundError` into a `MissingBackendError` naming
+  the extra to install. This is what lets `providers.py` define all four
+  provider classes with no backend installed.
+- **Expensive imports**, deferred when they cost more than roughly 100 ms and
+  are not needed on every path. Measure before deferring:
+
+  ```bash
+  python -X importtime -c "import reusable_llm_provider.providers"
+  ```
+
+  The vendor SDKs cost about 1.03 s of the 1.09 s this module used to take,
+  which is what motivated the extras.
+
+Ruff's `PLC0415` (imports inside functions) is intentionally **not** enabled: a
+linter cannot distinguish a deliberate deferred import from an accidental one,
+so enforcing it would mean a `noqa` on every guarded import. `scripts/check_extras.py`
+enforces the part that actually matters — that no vendor SDK is imported at module
+scope — and CI runs it in environments built with one extra, and with none.
+
 ### Functional Tests
 
 Functional tests under `functional_tests/` make live calls to real LLM providers and are excluded from the default `make test` target and from CI. Run them locally with:
 
 ```bash
-make functional-test
+make test-functional
 ```
 
 Requirements:
@@ -240,6 +310,8 @@ reusable-llm-provider/
             test_config.py
             test_providers.py
             test_version.py
+    scripts/
+        check_extras.py    # asserts backends are installed iff their extra is
     pyproject.toml
     README.md
 ```
@@ -254,4 +326,5 @@ reusable-llm-provider/
 - **No implicit global state.** The package does not read environment variables, configuration files, or secret stores of its own accord.
 - **Neutral vocabulary over passthrough.** Where a control diverges across providers — `temperature`, `thinking` — the public parameter is provider-neutral and each provider maps it. A passthrough would push per-provider branching into every caller, which is the thing this library exists to prevent.
 - **Unset means absent, not null.** Optional controls default to `None` and are omitted from the request entirely. Several providers reject parameters their newer models no longer support, so sending a default value makes those models unusable.
+- **Backends are optional, and absence is actionable.** Vendor SDKs are extras rather than hard dependencies, imported inside the constructor that needs them. A consumer of one backend does not install, or wait for, the other three. The cost of that choice is that a missing backend fails at construction rather than at import, so the failure names the extra to install and chains the original `ModuleNotFoundError` as its cause.
 - **Thin wrapper.** The abstraction is intentionally minimal. It unifies construction and invocation, but does not attempt to normalize provider-specific features such as streaming or multimodal inputs.

@@ -7,6 +7,9 @@ from pydantic import BaseModel
 
 from reusable_llm_provider.providers import (
     LLMGenerationError,
+    MissingBackendError,
+    _PROVIDER_MAP,
+    _requires_extra,
     LLMProviderGenerationError,
     StructuredOutputStrategy,
     StructuredOutputValidationError,
@@ -203,7 +206,7 @@ class TestAnthropicProvider:
         provider = AnthropicProvider(config)
         assert provider.model == "claude-3-haiku"
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_wraps_api_errors(self, mock_anthropic):
         """Test that invoke wraps API errors properly."""
         mock_client = Mock()
@@ -239,7 +242,7 @@ class TestAnthropicProvider:
             block.text = text
         return block
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_skips_thinking_blocks(self, mock_anthropic):
         """Extended thinking puts a non-text block first; invoke must skip it.
 
@@ -264,7 +267,7 @@ class TestAnthropicProvider:
 
         assert AnthropicProvider(config).invoke("test prompt") == "The sky is blue."
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_invoke_joins_multiple_text_blocks(self, mock_anthropic):
         """All text blocks are returned, not just the first.
 
@@ -305,7 +308,7 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(config)
         assert provider.model == "gpt-4o-mini"
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_invoke_wraps_api_errors(self, mock_openai):
         """Test that invoke wraps API errors properly."""
         mock_client = Mock()
@@ -324,7 +327,7 @@ class TestOpenAIProvider:
 
         assert exc_info.value.provider == "openai"
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_invoke_uses_max_completion_tokens(self, mock_openai):
         """The token cap must be sent as max_completion_tokens.
 
@@ -366,7 +369,7 @@ class TestEmptyOutputIsAnError:
         del block.text
         return block
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_all_thinking_response_raises(self, mock_anthropic):
         """Anthropic returns only a thinking block; joining yields ''."""
         mock_client = Mock()
@@ -385,7 +388,7 @@ class TestEmptyOutputIsAnError:
             AnthropicProvider(config).invoke("test prompt")
         assert exc_info.value.provider == "anthropic"
 
-    @patch("reusable_llm_provider.providers.genai")
+    @patch("google.genai")
     def test_vertex_none_text_raises(self, mock_genai):
         """Vertex sets .text to None when the budget ran out before output."""
         mock_client = Mock()
@@ -403,7 +406,7 @@ class TestEmptyOutputIsAnError:
             VertexAIProvider(config).invoke("test prompt")
         assert exc_info.value.provider == "vertex"
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_whitespace_only_response_raises(self, mock_anthropic):
         """Whitespace is not output either."""
         block = Mock()
@@ -422,7 +425,7 @@ class TestEmptyOutputIsAnError:
         with pytest.raises(LLMProviderGenerationError):
             AnthropicProvider(config).invoke("test prompt")
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_ordinary_text_is_returned_unchanged(self, mock_anthropic):
         """Surrounding whitespace in a real answer must survive."""
         block = Mock()
@@ -529,7 +532,7 @@ class TestThinkingControl:
 
     # --- the regression guard for existing callers -----------------------
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_unset_sends_no_thinking_parameter(self, mock_anthropic):
         """Default must leave the request byte-identical to 0.5.1."""
         mock_client = Mock()
@@ -546,7 +549,7 @@ class TestThinkingControl:
 
         assert "thinking" not in mock_client.messages.create.call_args.kwargs
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_auto_also_sends_nothing(self, mock_anthropic):
         """'auto' records intent; no provider needs an explicit signal for it.
 
@@ -569,7 +572,7 @@ class TestThinkingControl:
 
     # --- per-provider mapping -------------------------------------------
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_off(self, mock_anthropic):
         mock_client = Mock()
         block = Mock()
@@ -586,7 +589,7 @@ class TestThinkingControl:
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "disabled"}
 
-    @patch("reusable_llm_provider.providers.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_budget(self, mock_anthropic):
         mock_client = Mock()
         block = Mock()
@@ -606,7 +609,7 @@ class TestThinkingControl:
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 2048}
 
-    @patch("reusable_llm_provider.providers.OpenAI")
+    @patch("openai.OpenAI")
     def test_openai_off(self, mock_openai):
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = Mock(
@@ -640,3 +643,54 @@ class TestThinkingControl:
         with pytest.raises(ValueError) as exc_info:
             OllamaProvider(cfg)
         assert "ollama" in str(exc_info.value).lower()
+
+
+class TestMissingBackendExtra:
+    """A backend whose extra is not installed must say which extra to install.
+
+    The bare failure names the missing *package* (``langchain_openai``),
+    which is not the name of the *extra* (``openai``) a caller would have to
+    install -- so the one identifier in the message is the one that does not
+    help.
+    """
+
+    def test_missing_extra_names_the_extra_and_the_install_spec(self):
+        with pytest.raises(MissingBackendError) as exc_info:
+            with _requires_extra("openai"):
+                raise ModuleNotFoundError("No module named 'langchain_openai'")
+
+        message = str(exc_info.value)
+        assert "openai" in message
+        assert "reusable-llm-provider[openai]" in message
+
+    def test_missing_extra_chains_the_underlying_import_error(self):
+        original = ModuleNotFoundError("No module named 'langchain_openai'")
+        with pytest.raises(MissingBackendError) as exc_info:
+            with _requires_extra("openai"):
+                raise original
+
+        assert exc_info.value.__cause__ is original
+
+    def test_missing_backend_error_is_an_import_error(self):
+        """Callers already handling a bare ImportError keep working."""
+        assert issubclass(MissingBackendError, ImportError)
+
+    def test_unrelated_errors_pass_through(self):
+        with pytest.raises(ValueError):
+            with _requires_extra("openai"):
+                raise ValueError("not an import problem")
+
+    def test_declared_extras_match_the_provider_names(self):
+        """The message is built from ``NAME``, so the two must not drift.
+
+        A provider named ``vertex`` whose extra is spelled ``vertexai`` would
+        print an install command that does not work.
+        """
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        declared = set(tomllib.loads(pyproject.read_text())["tool"]["poetry"]["extras"])
+        names = {cls.NAME for cls in _PROVIDER_MAP.values()}
+
+        assert declared == names | {"all"}

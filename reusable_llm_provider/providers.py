@@ -23,14 +23,6 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Protocol, Type
 
-from anthropic import Anthropic
-from google import genai
-from google.genai import types
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import ChatOllama, OllamaLLM
-from langchain_openai import ChatOpenAI
-from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, LLMProviderType
@@ -120,6 +112,37 @@ class StructuredOutputValidationError(LLMGenerationError):
     @property
     def validation_error(self) -> Exception:
         return self.original_error
+
+
+class MissingBackendError(ImportError):
+    """A backend's optional extra is not installed.
+
+    Subclasses ``ImportError`` so callers already handling a missing backend
+    that way keep working. The underlying ``ModuleNotFoundError`` is chained
+    rather than discarded: it names the package that is actually absent, which
+    is deliberately not the name of the extra to install --
+    ``langchain_openai`` missing means the ``openai`` extra is wanted. Naming
+    only one of the two would leave the reader to guess the other.
+
+    No installer is named. Consumers of this package use Poetry, pip and uv;
+    the dependency spec is the part they all share.
+    """
+
+    def __init__(self, extra: str):
+        self.extra = extra
+        super().__init__(
+            f"The {extra} backend is not installed. Install this package as "
+            f"reusable-llm-provider[{extra}] to use it."
+        )
+
+
+@contextmanager
+def _requires_extra(extra: str):
+    """Translate a vendor package's absence into an actionable error."""
+    try:
+        yield
+    except ImportError as exc:
+        raise MissingBackendError(extra) from exc
 
 
 class LLMProvider(Protocol):
@@ -336,6 +359,10 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "function_calling"
 
     def __init__(self, config: LLMConfig):
+        with _requires_extra("anthropic"):
+            from anthropic import Anthropic
+            from langchain_anthropic import ChatAnthropic
+
         super().__init__(config)
         self.client = Anthropic(api_key=config.anthropic_api_key)
         self.chat_model = ChatAnthropic(
@@ -385,6 +412,10 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
+        with _requires_extra("openai"):
+            from langchain_openai import ChatOpenAI
+            from openai import OpenAI
+
         super().__init__(config)
         self.client = OpenAI(
             api_key=config.openai_api_key,
@@ -440,6 +471,11 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     _LANGCHAIN_METHOD = "json_schema"
 
     def __init__(self, config: LLMConfig):
+        with _requires_extra("vertex"):
+            from google import genai
+            from google.genai import types
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
         super().__init__(config)
         self.client = genai.Client(
             vertexai=True,
@@ -475,6 +511,8 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         return None
 
     def _thinking(self) -> dict:
+        from google.genai import types
+
         budget = self._thinking_budget()
         if budget is None:
             return {}
@@ -487,6 +525,8 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         return {"thinking_budget": budget}
 
     def _invoke_raw_text(self, prompt: str) -> str:
+        from google.genai import types
+
         request_config = types.GenerateContentConfig(
             max_output_tokens=self.max_tokens,
             **self._sampling(),
@@ -510,6 +550,9 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
     STRATEGY = StructuredOutputStrategy.LANGCHAIN_MEDIATED
 
     def __init__(self, config: LLMConfig):
+        with _requires_extra("ollama"):
+            from langchain_ollama import ChatOllama, OllamaLLM
+
         super().__init__(config)
         self._reject_thinking_budget("thinking='off' or thinking='auto'")
         self.llm = OllamaLLM(model=config.model, **self._sampling(), **self._thinking())
