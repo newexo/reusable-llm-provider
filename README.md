@@ -35,13 +35,13 @@ Install from the GitHub repository using Poetry, naming the extras you need:
 
 ```toml
 [tool.poetry.dependencies]
-reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.7.0", extras = ["anthropic"]}
+reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.7.1", extras = ["anthropic"]}
 ```
 
 Or with pip:
 
 ```bash
-pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.7.0"
+pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.7.1"
 ```
 
 Several extras may be combined: `extras = ["anthropic", "ollama"]`. Use `all` if
@@ -131,9 +131,7 @@ The `thinking` parameter controls this:
 
 ```python
 # Sized for the output alone, with reasoning turned off
-config = create_anthropic_config(
-    model="claude-opus-5", max_tokens=300, thinking="off"
-)
+config = create_anthropic_config(model="claude-opus-5", max_tokens=300, thinking="off")
 ```
 
 The default is `None`, so existing callers are unaffected. Disabling by default
@@ -245,15 +243,21 @@ and the functional tests call the real SDKs.
 
 ### Commands
 
-| Command                | Description                                    |
-|------------------------|------------------------------------------------|
-| `make test`            | Run the unit test suite.                       |
-| `make test-functional` | Run live tests against real LLM providers.     |
-| `make format`          | Format the code with Ruff.                     |
-| `make lint`            | Run Ruff lint checks.                          |
-| `make check`           | Run formatting, linting, and tests.            |
-| `make coverage`        | Run tests with coverage enforcement.           |
-| `make coverage-html`   | Create an HTML coverage report.                |
+| Command                  | Description                                                        |
+|--------------------------|--------------------------------------------------------------------|
+| `make test`              | Run the unit test suite.                                           |
+| `make test-functional`   | Run live tests against real LLM providers.                         |
+| `make format`            | Apply safe lint fixes, then format with Ruff.                      |
+| `make format-check`      | Verify formatting without rewriting anything (what CI runs).       |
+| `make lint`              | Run Ruff lint checks.                                              |
+| `make check`             | `format-check`, `lint`, `test`. Does not modify files.             |
+| `make coverage`          | Run tests with coverage enforcement.                               |
+| `make coverage-html`     | Create an HTML coverage report.                                    |
+| `make import-boundaries` | Verify each optional dependency is imported by one module.         |
+| `make check-extras`      | Verify a backend is usable iff its extra is installed.             |
+| `make deps-check`        | Verify imports are declared, and declared in the right group.      |
+| `make deadcode`          | Report unused code. Advisory; not part of `check`.                 |
+| `make test-wheel`        | Run the shipped tests against a built and installed wheel.         |
 
 ### Import Conventions
 
@@ -275,11 +279,57 @@ of them inside a function body:
   The vendor SDKs cost about 1.03 s of the 1.09 s this module used to take,
   which is what motivated the extras.
 
+Each optional dependency must also be imported by **at most one** library
+module, which owns it and hands out instances; everything else receives an
+implementation by injection. `make import-boundaries` enforces this. Today every
+vendor SDK is imported only by `providers.py`.
+
 Ruff's `PLC0415` (imports inside functions) is intentionally **not** enabled: a
 linter cannot distinguish a deliberate deferred import from an accidental one,
 so enforcing it would mean a `noqa` on every guarded import. `scripts/check_extras.py`
 enforces the part that actually matters — that no vendor SDK is imported at module
 scope — and CI runs it in environments built with one extra, and with none.
+
+### Testing the Built Package
+
+`make test-wheel` builds a wheel, installs it into a throwaway virtualenv, and
+runs the **shipped** tests against the installed package from a different
+working directory. The directory change is the point: from the repository root
+`import reusable_llm_provider` resolves to the source tree even when the wheel
+is installed, so a test run there would silently exercise the wrong code.
+
+It catches what a source-tree run cannot — a file that does not ship, or a test
+that depends on the repository. Two tests are skipped under it by design: one
+asserts the repository layout, and one reads `pyproject.toml`, which is not part
+of a wheel.
+
+The wheel is installed **bare**, with no extras, because that is the supported
+install. Tests marked `needs_backends` — everything in `test_providers.py`, which
+patches vendor symbols or constructs providers — are deselected, and
+`test_packaging.py` covers what must hold with no backend at all: the package
+imports, all four providers are defined, and an absent backend raises
+`MissingBackendError` naming its extra. Those last assertions can only run
+somewhere the backends are genuinely missing, so they skip in development and
+execute here.
+
+Installing `[all]` instead would also work, but it downloads every vendor SDK on
+every CI job — 136 MB against 35 MB — and grows with each backend added.
+
+### Dead Code and Dependency Hygiene
+
+`make deps-check` (deptry) verifies that every imported package is declared, and
+declared in the right group. It is part of CI and its failures are usually real.
+
+`make deadcode` (vulture) is **advisory** and is deliberately not part of `make
+check` or CI. A library's public API is uncalled by construction, so the report
+needs reading rather than obeying — `LLMProvider`, `LLMTransportError` and the
+unused `StructuredOutputStrategy` members are all deliberately present. Those
+known findings are baselined in `deadcode-whitelist.py`, so the target reports
+only *newly* dead code. Regenerate the baseline with:
+
+```bash
+poetry run vulture --make-whitelist reusable_llm_provider scripts > deadcode-whitelist.py
+```
 
 ### Functional Tests
 
@@ -304,14 +354,21 @@ reusable-llm-provider/
     reusable_llm_provider/
         __init__.py
         _version.py
-        config.py          # LLMConfig and factory functions
-        providers.py       # Provider implementations and create_provider
+        config.py              # LLMConfig and factory functions
+        providers.py           # Provider implementations and create_provider
+        directories.py         # Path helpers for the package and repository
+        env.py                 # Test-support .env loading; no library module imports it
+        py.typed               # Ships the annotations to consumers
         tests/
             test_config.py
+            test_directories.py
             test_providers.py
             test_version.py
+    functional_tests/          # Live calls to real providers; not run by `make test`
     scripts/
-        check_extras.py    # asserts backends are installed iff their extra is
+        check_extras.py        # Asserts backends are installed iff their extra is
+        import_boundaries.py   # Asserts each optional dependency has one owner
+    deadcode-whitelist.py      # Vulture baseline; see Dead Code below
     pyproject.toml
     README.md
 ```
