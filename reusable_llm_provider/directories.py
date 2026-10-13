@@ -16,20 +16,8 @@ def base(filename=None):
     return qualifyname(code().parent, filename)
 
 
-def data(filename=None):
-    return qualifyname(base("data"), filename)
-
-
-def package_data(filename=None):
-    return qualifyname(code("data"), filename)
-
-
 def tests(filename=None):
     return qualifyname(code("tests"), filename)
-
-
-def test_data(filename=None):
-    return qualifyname(tests("test_data"), filename)
 
 
 def secrets(filename=None):
