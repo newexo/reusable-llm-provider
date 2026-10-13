@@ -6,6 +6,7 @@
 # supported install -- see test_packaging.py for what must hold without any
 # backend.
 
+import tomllib
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -16,6 +17,7 @@ from reusable_llm_provider.config import LLMConfig, LLMProviderType
 from reusable_llm_provider.providers import (
     _PROVIDER_MAP,
     AnthropicProvider,
+    BaseLLMProvider,
     LLMGenerationError,
     LLMProviderGenerationError,
     MissingBackendError,
@@ -496,9 +498,6 @@ class TestSamplingOmission:
     """
 
     def _provider(self, temperature):
-        from reusable_llm_provider.config import LLMConfig, LLMProviderType
-        from reusable_llm_provider.providers import BaseLLMProvider
-
         class _Bare(BaseLLMProvider):
             NAME = "bare"
 
@@ -704,8 +703,6 @@ class TestMissingBackendExtra:
         A provider named ``vertex`` whose extra is spelled ``vertexai`` would
         print an install command that does not work.
         """
-        import tomllib
-
         config = tomllib.loads(_PYPROJECT.read_text())
         declared = set(config["project"]["optional-dependencies"])
         names = {cls.NAME for cls in _PROVIDER_MAP.values()}

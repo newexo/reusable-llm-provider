@@ -8,6 +8,23 @@ missing with a usable error — none of which requires a backend to be present.
 against a bare wheel, having deselected the `needs_backends` suite. Keep it free
 of vendor imports and of anything that constructs a provider, or the wheel test
 stops working.
+
+Two things carry the weight here, and neither is an assertion:
+
+- **Collection is the regression test.** In the bare wheel, a vendor import that
+  moved back to module scope makes importing `providers` raise, so this file
+  fails to import and the wheel job goes red.
+- **`test_absent_backend_names_its_extra` only executes where a backend really is
+  missing**, so it skips in development and runs for real in the wheel job. It is
+  the one place the `MissingBackendError` path meets a genuinely absent SDK
+  rather than a mock.
+
+Do not add an assertion over `sys.modules` here. Observing what an import pulls
+in requires a process that has not already imported it, which no test in this
+file can be; the previous attempt passed only because this filename sorts before
+`test_providers.py`, whose mocks import the vendor SDKs. That check belongs in a
+fresh process and lives in `scripts/check_extras.py`, which CI runs per extra and
+with none.
 """
 
 import importlib.util
@@ -38,26 +55,13 @@ def _installed(extra):
 
 
 class TestBareInstall:
-    def test_importing_providers_pulls_in_no_vendor_sdk(self):
-        import sys
-
-        import reusable_llm_provider.providers  # noqa: F401
-
-        loaded = {name.split(".")[0] for name in sys.modules}
-        assert not loaded & {
-            "anthropic",
-            "openai",
-            "langchain_anthropic",
-            "langchain_google_genai",
-            "langchain_ollama",
-            "langchain_openai",
-        }
-
-    def test_every_provider_is_defined_without_its_backend(self):
+    def test_all_four_providers_are_registered(self):
         """Defining a provider class must not require its SDK.
 
-        This is what keeps `_PROVIDER_MAP` intact on a bare install, so the
-        error a caller gets is the actionable one rather than a KeyError.
+        Trivially true where every extra is installed; in the wheel job it is
+        the assertion that `_PROVIDER_MAP` survives a bare install, so a caller
+        asking for a missing backend gets `MissingBackendError` and not a
+        `KeyError`.
         """
         assert {cls.NAME for cls in _PROVIDER_MAP.values()} == {
             "anthropic",
