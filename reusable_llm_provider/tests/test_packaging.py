@@ -4,10 +4,10 @@ A bare install is the supported install: every vendor SDK is an extra, so the
 package has to import, name all four providers, and refuse the ones that are
 missing with a usable error — none of which requires a backend to be present.
 
-`make test-wheel` runs exactly this file (plus the config, directories and
-version tests) against a bare wheel, having deselected the `needs_backends`
-suite. Keep it free of vendor imports and of anything that constructs a
-provider, or the wheel test stops working.
+`make test-wheel` runs exactly this file (plus the config and version tests)
+against a bare wheel, having deselected the `needs_backends` suite. Keep it free
+of vendor imports and of anything that constructs a provider, or the wheel test
+stops working.
 """
 
 import importlib.util

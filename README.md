@@ -2,6 +2,24 @@
 
 A reusable provider abstraction layer for large language model APIs. It exposes a uniform interface over multiple backends so application code can stay agnostic to the specific SDK, authentication mechanism, or response format of each provider.
 
+## Scope
+
+This package is deliberately tiny. It exists to hold the handful of conventions
+that every project talking to an LLM would otherwise rewrite — where credentials
+come from, which sampling and reasoning parameters are safe to send to which
+generation of model, how structured output is validated, and which vendor SDKs
+get installed. Nothing more.
+
+So it carries none of the scaffolding an application accumulates: no data
+directory, no path helpers, no configuration files, no global state, no logging
+setup, no CLI. The package is four modules, and a consumer's only entry points
+are `LLMConfig`, `create_provider`, and the two methods below.
+
+That is also why the layout departs from the canonical project template used
+across these repositories. The template assumes a data-science project with
+data to address on disk; this one has no data, so the helpers that would address
+it are absent rather than present and unused.
+
 ## Public Contract
 
 Every provider implements the same `LLMProvider` protocol with two methods:
@@ -356,15 +374,14 @@ reusable-llm-provider/
         _version.py
         config.py              # LLMConfig and factory functions
         providers.py           # Provider implementations and create_provider
-        directories.py         # Path helpers for the package and repository
-        env.py                 # Test-support .env loading; no library module imports it
         py.typed               # Ships the annotations to consumers
         tests/
             test_config.py
-            test_directories.py
+            test_packaging.py  # What must hold for an install with no backend
             test_providers.py
             test_version.py
     functional_tests/          # Live calls to real providers; not run by `make test`
+        env.py                 # Loads secrets/.env for the live tests only
     scripts/
         check_extras.py        # Asserts backends are installed iff their extra is
         import_boundaries.py   # Asserts each optional dependency has one owner
@@ -384,4 +401,5 @@ reusable-llm-provider/
 - **Neutral vocabulary over passthrough.** Where a control diverges across providers — `temperature`, `thinking` — the public parameter is provider-neutral and each provider maps it. A passthrough would push per-provider branching into every caller, which is the thing this library exists to prevent.
 - **Unset means absent, not null.** Optional controls default to `None` and are omitted from the request entirely. Several providers reject parameters their newer models no longer support, so sending a default value makes those models unusable.
 - **Backends are optional, and absence is actionable.** Vendor SDKs are extras rather than hard dependencies, imported inside the constructor that needs them. A consumer of one backend does not install, or wait for, the other three. The cost of that choice is that a missing backend fails at construction rather than at import, so the failure names the extra to install and chains the original `ModuleNotFoundError` as its cause.
+- **Nothing ships that a consumer cannot use.** The package holds no path helpers, data directory or environment loading, because every one of those addresses the repository rather than the installed package: from a wheel they resolve inside `site-packages` and mean nothing. Repository-addressing code lives with the tests that need it.
 - **Thin wrapper.** The abstraction is intentionally minimal. It unifies construction and invocation, but does not attempt to normalize provider-specific features such as streaming or multimodal inputs.
