@@ -6,16 +6,18 @@
 # supported install -- see test_packaging.py for what must hold without any
 # backend.
 
+import tomllib
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 from pydantic import BaseModel
 
-from reusable_llm_provider import directories
 from reusable_llm_provider.config import LLMConfig, LLMProviderType
 from reusable_llm_provider.providers import (
     _PROVIDER_MAP,
     AnthropicProvider,
+    BaseLLMProvider,
     LLMGenerationError,
     LLMProviderGenerationError,
     MissingBackendError,
@@ -27,6 +29,10 @@ from reusable_llm_provider.providers import (
     _requires_extra,
     create_provider,
 )
+
+# Anchored to this file rather than to a path helper: the repository root is two
+# levels up from the shipped tests, and only a checkout has a pyproject.toml.
+_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 pytestmark = pytest.mark.needs_backends
 
@@ -492,9 +498,6 @@ class TestSamplingOmission:
     """
 
     def _provider(self, temperature):
-        from reusable_llm_provider.config import LLMConfig, LLMProviderType
-        from reusable_llm_provider.providers import BaseLLMProvider
-
         class _Bare(BaseLLMProvider):
             NAME = "bare"
 
@@ -691,7 +694,7 @@ class TestMissingBackendExtra:
                 raise ValueError("not an import problem")
 
     @pytest.mark.skipif(
-        not directories.base("pyproject.toml").exists(),
+        not _PYPROJECT.exists(),
         reason="pyproject.toml is not shipped; this can only run from a checkout",
     )
     def test_declared_extras_match_the_provider_names(self):
@@ -700,9 +703,7 @@ class TestMissingBackendExtra:
         A provider named ``vertex`` whose extra is spelled ``vertexai`` would
         print an install command that does not work.
         """
-        import tomllib
-
-        config = tomllib.loads(directories.base("pyproject.toml").read_text())
+        config = tomllib.loads(_PYPROJECT.read_text())
         declared = set(config["project"]["optional-dependencies"])
         names = {cls.NAME for cls in _PROVIDER_MAP.values()}
 

@@ -6,9 +6,8 @@ and cannot be. Shipping a loader for it gave every consumer a function that
 silently found nothing, and, under an editable install, one that would have
 loaded this project's own credentials into theirs.
 
-Paths are anchored to this file rather than to the package's `directories`
-helpers, so the tests go on addressing the checkout even when the package under
-test is installed from a wheel.
+Paths are anchored to this file, so the tests go on addressing the checkout even
+when the package under test is installed from a wheel.
 """
 
 from pathlib import Path
