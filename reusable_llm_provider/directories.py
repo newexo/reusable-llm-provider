@@ -18,12 +18,3 @@ def base(filename=None):
 
 def tests(filename=None):
     return qualifyname(code("tests"), filename)
-
-
-def secrets(filename=None):
-    """Repository-level secrets directory.
-
-    Addresses the checkout, not the installed package: `secrets/` is gitignored
-    and never ships. Only the functional tests read from it.
-    """
-    return qualifyname(base("secrets"), filename)

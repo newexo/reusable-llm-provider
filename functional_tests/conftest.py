@@ -12,10 +12,11 @@ from reusable_llm_provider.config import (
     create_openai_config,
     create_vertex_config,
 )
-from reusable_llm_provider.env import load_reusable_llm_provider_env
 from reusable_llm_provider.providers import create_provider
 
-load_reusable_llm_provider_env()
+from .env import load_env
+
+load_env()
 
 
 @pytest.fixture

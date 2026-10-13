@@ -1,6 +1,6 @@
 [project]
 name = "reusable_llm_provider"
-version = "0.8.1"
+version = "0.8.2"
 description = "Reusable LLM provider abstraction layer supporting Anthropic, OpenAI, Vertex AI, and Ollama"
 authors = [{ name = "Reuben Brasher", email = "rkbrasher@gmail.com" }]
 license = "MIT"
@@ -84,10 +84,14 @@ exclude_lines = [
 ]
 
 [tool.deptry]
-# The test suite imports pytest, and functional_tests imports dotenv through
-# env.py; both are correctly dev dependencies.
+# deptry excludes `tests` by default but not a second test tree, and
+# functional_tests is test code: it imports dotenv to read secrets/.env.
+extend_exclude = ["functional_tests"]
+
+# The unit suite lives inside the package, so it is scanned as source; it
+# imports pytest, which is correctly a dev dependency.
 [tool.deptry.per_rule_ignores]
-DEP004 = ["pytest", "dotenv"]
+DEP004 = ["pytest"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -11,8 +11,8 @@ def _is_source_checkout():
 
 class TestDirectories:
     """`code()` and `tests()` address the package and hold anywhere it is
-    installed. `base()` and `secrets()` address the repository, so assertions
-    about them are skipped when the tests run from a wheel.
+    installed. `base()` addresses the repository, so assertions about it are
+    skipped when the tests run from a wheel.
     """
 
     def test_package_directories_exist(self):
@@ -25,13 +25,11 @@ class TestDirectories:
 
     @pytest.mark.skipif(
         not _is_source_checkout(),
-        reason="base() and secrets() address the repository, not an installed package",
+        reason="base() addresses the repository, not an installed package",
     )
     def test_source_checkout_layout(self):
         assert directories.base().is_dir()
-        assert directories.secrets().is_dir()
         assert directories.base("README.md").exists()
-        assert directories.secrets("README.md").exists()
 
     def test_qualifyname_without_filename_returns_the_directory(self):
         assert directories.qualifyname("/tmp") == Path("/tmp")
