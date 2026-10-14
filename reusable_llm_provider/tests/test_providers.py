@@ -708,3 +708,81 @@ class TestMissingBackendExtra:
         names = {cls.NAME for cls in _PROVIDER_MAP.values()}
 
         assert declared == names | {"all"}
+
+
+class TestChatModelIsLazy:
+    """The LangChain chat model is only needed for structured output.
+
+    Building it in ``__init__`` made every caller pay for it, including the
+    ones that only ever call ``invoke``, and inherit its failure modes. It is
+    now built on first use and cached. The native client stays eager, so a
+    missing extra is still reported at construction.
+    """
+
+    @patch("anthropic.Anthropic")
+    @patch("langchain_anthropic.ChatAnthropic")
+    def test_anthropic_defers_its_chat_model(self, mock_chat, _mock_client):
+        AnthropicProvider(
+            LLMConfig(
+                provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k"
+            )
+        )
+        mock_chat.assert_not_called()
+
+    @patch("openai.OpenAI")
+    @patch("langchain_openai.ChatOpenAI")
+    def test_openai_defers_its_chat_model(self, mock_chat, _mock_client):
+        OpenAIProvider(
+            LLMConfig(provider=LLMProviderType.OPENAI, model="m", openai_api_key="k")
+        )
+        mock_chat.assert_not_called()
+
+    @patch("google.genai")
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI")
+    def test_vertex_defers_its_chat_model(self, mock_chat, _mock_genai):
+        VertexAIProvider(
+            LLMConfig(
+                provider=LLMProviderType.VERTEX,
+                model="m",
+                vertex_project_id="p",
+                vertex_location="us-central1",
+            )
+        )
+        mock_chat.assert_not_called()
+
+    @patch("langchain_ollama.OllamaLLM")
+    @patch("langchain_ollama.ChatOllama")
+    def test_ollama_defers_its_chat_model(self, mock_chat, _mock_llm):
+        OllamaProvider(LLMConfig(provider=LLMProviderType.OLLAMA, model="m"))
+        mock_chat.assert_not_called()
+
+    @patch("anthropic.Anthropic")
+    @patch("langchain_anthropic.ChatAnthropic")
+    def test_chat_model_is_built_once_and_cached(self, mock_chat, _mock_client):
+        provider = AnthropicProvider(
+            LLMConfig(
+                provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k"
+            )
+        )
+        first = provider.chat_model
+        second = provider.chat_model
+        assert first is second
+        mock_chat.assert_called_once()
+
+    @patch("anthropic.Anthropic")
+    @patch("langchain_anthropic.ChatAnthropic")
+    def test_a_missing_extra_is_still_reported_at_construction(
+        self, _mock_chat, mock_client
+    ):
+        """Laziness must not postpone the actionable error.
+
+        The native client is still built eagerly, so `create_provider` remains
+        the place a missing backend is reported.
+        """
+        mock_client.side_effect = ImportError("No module named 'anthropic'")
+        with pytest.raises(ImportError):
+            AnthropicProvider(
+                LLMConfig(
+                    provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k"
+                )
+            )

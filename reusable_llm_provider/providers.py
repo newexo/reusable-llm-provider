@@ -338,9 +338,27 @@ class _LangChainStructuredMixin:
     """
 
     _LANGCHAIN_METHOD: str | None = None
+    _chat_model: Any = None
+
+    def _build_chat_model(self):
+        raise NotImplementedError
+
+    @property
+    def chat_model(self):
+        """The LangChain model, built on first use and then cached.
+
+        Only structured output needs it, so a caller that only ever calls
+        ``invoke`` never builds one. The cost is that a configuration the
+        LangChain class rejects surfaces here rather than at construction;
+        the native client is still built eagerly, so a missing extra is
+        still reported by ``create_provider``.
+        """
+        if self._chat_model is None:
+            self._chat_model = self._build_chat_model()
+        return self._chat_model
 
     def _structured_model(self):
-        raise NotImplementedError
+        return self.chat_model
 
     def _invoke_structured_candidate(
         self, prompt: str, output_model: type[BaseModel]
@@ -364,13 +382,18 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
     def __init__(self, config: LLMConfig):
         with _requires_extra("anthropic"):
             from anthropic import Anthropic
-            from langchain_anthropic import ChatAnthropic
 
         super().__init__(config)
-        self.client = Anthropic(api_key=config.anthropic_api_key)
-        self.chat_model = ChatAnthropic(
+        self._api_key = config.anthropic_api_key
+        self.client = Anthropic(api_key=self._api_key)
+
+    def _build_chat_model(self):
+        with _requires_extra("anthropic"):
+            from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(
             model=self.model,
-            api_key=config.anthropic_api_key,
+            api_key=self._api_key,
             max_tokens=self.max_tokens,
             **self._sampling(),
             **self._thinking(),
@@ -403,9 +426,6 @@ class AnthropicProvider(_LangChainStructuredMixin, BaseLLMProvider):
             block.text for block in response.content if block.type == "text"
         )
 
-    def _structured_model(self):
-        return self.chat_model
-
 
 class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for OpenAI's API."""
@@ -416,19 +436,25 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
 
     def __init__(self, config: LLMConfig):
         with _requires_extra("openai"):
-            from langchain_openai import ChatOpenAI
             from openai import OpenAI
 
         super().__init__(config)
+        self._api_key = config.openai_api_key
+        self._organization = config.openai_organization
         self.client = OpenAI(
-            api_key=config.openai_api_key,
-            organization=config.openai_organization,
+            api_key=self._api_key,
+            organization=self._organization,
         )
         self._reject_thinking_budget("thinking='off' or thinking='auto'")
-        self.chat_model = ChatOpenAI(
+
+    def _build_chat_model(self):
+        with _requires_extra("openai"):
+            from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
             model=self.model,
-            api_key=config.openai_api_key,
-            organization=config.openai_organization,
+            api_key=self._api_key,
+            organization=self._organization,
             max_tokens=self.max_tokens,
             **self._sampling(),
             **self._thinking(),
@@ -458,9 +484,6 @@ class OpenAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         )
         return response.choices[0].message.content
 
-    def _structured_model(self):
-        return self.chat_model
-
 
 class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for Google's Vertex AI (Gemini).
@@ -477,19 +500,25 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         with _requires_extra("vertex"):
             from google import genai
             from google.genai import types
-            from langchain_google_genai import ChatGoogleGenerativeAI
 
         super().__init__(config)
+        self._project_id = config.vertex_project_id
+        self._location = config.vertex_location
         self.client = genai.Client(
             vertexai=True,
-            project=config.vertex_project_id,
-            location=config.vertex_location,
+            project=self._project_id,
+            location=self._location,
             http_options=types.HttpOptions(api_version="v1"),
         )
-        self.chat_model = ChatGoogleGenerativeAI(
+
+    def _build_chat_model(self):
+        with _requires_extra("vertex"):
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
             model=self.model,
-            project=config.vertex_project_id,
-            location=config.vertex_location,
+            project=self._project_id,
+            location=self._location,
             vertexai=True,
             max_output_tokens=self.max_tokens,
             **self._thinking_langchain(),
@@ -542,9 +571,6 @@ class VertexAIProvider(_LangChainStructuredMixin, BaseLLMProvider):
         )
         return response.text
 
-    def _structured_model(self):
-        return self.chat_model
-
 
 class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
     """Provider for local Ollama instances."""
@@ -554,14 +580,17 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
 
     def __init__(self, config: LLMConfig):
         with _requires_extra("ollama"):
-            from langchain_ollama import ChatOllama, OllamaLLM
+            from langchain_ollama import OllamaLLM
 
         super().__init__(config)
         self._reject_thinking_budget("thinking='off' or thinking='auto'")
         self.llm = OllamaLLM(model=config.model, **self._sampling(), **self._thinking())
-        self.chat_model = ChatOllama(
-            model=config.model, **self._sampling(), **self._thinking()
-        )
+
+    def _build_chat_model(self):
+        with _requires_extra("ollama"):
+            from langchain_ollama import ChatOllama
+
+        return ChatOllama(model=self.model, **self._sampling(), **self._thinking())
 
     def _thinking(self) -> dict:
         """Ollama's reasoning toggle, or nothing.
@@ -576,9 +605,6 @@ class OllamaProvider(_LangChainStructuredMixin, BaseLLMProvider):
 
     def _invoke_raw_text(self, prompt: str) -> str:
         return self.llm.invoke(prompt)
-
-    def _structured_model(self):
-        return self.chat_model
 
 
 _PROVIDER_MAP = {
