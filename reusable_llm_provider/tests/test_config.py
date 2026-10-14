@@ -179,3 +179,63 @@ class TestThinkingVocabulary:
     def test_rejected_values(self, value):
         with pytest.raises(ValueError):
             LLMConfig(provider=LLMProviderType.ANTHROPIC, model="m", thinking=value)
+
+
+class TestExplicitCredentials:
+    """Credentials may be passed in; the environment is the fallback.
+
+    The factories previously read credentials only from the environment, so a
+    process had exactly one Anthropic key, one OpenAI organisation and one
+    Vertex project, set ambiently. A caller that holds the values — one talking
+    to two Vertex projects, say — had to bypass the factory and lose its model
+    defaults with it.
+    """
+
+    def test_anthropic_argument_overrides_the_environment(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+        config = create_anthropic_config(api_key="explicit")
+        assert config.anthropic_api_key == "explicit"
+
+    def test_anthropic_falls_back_to_the_environment(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+        assert create_anthropic_config().anthropic_api_key == "from-env"
+
+    def test_openai_arguments_override_the_environment(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "from-env")
+        monkeypatch.setenv("OPENAI_ORGANIZATION", "org-from-env")
+        config = create_openai_config(api_key="explicit", organization="org-explicit")
+        assert config.openai_api_key == "explicit"
+        assert config.openai_organization == "org-explicit"
+
+    def test_openai_falls_back_to_the_environment(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "from-env")
+        monkeypatch.setenv("OPENAI_ORGANIZATION", "org-from-env")
+        config = create_openai_config()
+        assert config.openai_api_key == "from-env"
+        assert config.openai_organization == "org-from-env"
+
+    def test_vertex_arguments_override_the_environment(self, monkeypatch):
+        monkeypatch.setenv("VERTEX_PROJECT_ID", "project-from-env")
+        monkeypatch.setenv("VERTEX_LOCATION", "location-from-env")
+        config = create_vertex_config(project_id="explicit", location="us-west1")
+        assert config.vertex_project_id == "explicit"
+        assert config.vertex_location == "us-west1"
+
+    def test_vertex_falls_back_to_the_environment(self, monkeypatch):
+        monkeypatch.setenv("VERTEX_PROJECT_ID", "project-from-env")
+        monkeypatch.setenv("VERTEX_LOCATION", "location-from-env")
+        config = create_vertex_config()
+        assert config.vertex_project_id == "project-from-env"
+        assert config.vertex_location == "location-from-env"
+
+    def test_each_credential_falls_back_independently(self, monkeypatch):
+        """Passing one value must not discard the environment for the other."""
+        monkeypatch.setenv("VERTEX_PROJECT_ID", "project-from-env")
+        monkeypatch.setenv("VERTEX_LOCATION", "location-from-env")
+        config = create_vertex_config(location="us-west1")
+        assert config.vertex_project_id == "project-from-env"
+        assert config.vertex_location == "us-west1"
+
+    def test_unset_everywhere_stays_none(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert create_anthropic_config().anthropic_api_key is None

@@ -100,8 +100,13 @@ def create_anthropic_config(
     temperature: float | None = None,
     max_tokens: int | None = None,
     thinking: str | int | None = None,
+    api_key: str | None = None,
 ) -> LLMConfig:
-    """Create Anthropic configuration from environment variables."""
+    """Create Anthropic configuration, from arguments or the environment.
+
+    Each credential falls back to its environment variable independently, so
+    passing one does not discard the others.
+    """
     if model is None:
         model = DEFAULT_MODELS["anthropic"]
 
@@ -111,7 +116,7 @@ def create_anthropic_config(
         max_tokens=max_tokens,
         thinking=thinking,
         model=model,
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+        anthropic_api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
     )
 
 
@@ -120,8 +125,14 @@ def create_openai_config(
     temperature: float | None = None,
     max_tokens: int | None = None,
     thinking: str | int | None = None,
+    api_key: str | None = None,
+    organization: str | None = None,
 ) -> LLMConfig:
-    """Create OpenAI configuration from environment variables."""
+    """Create OpenAI configuration, from arguments or the environment.
+
+    Each credential falls back to its environment variable independently, so
+    passing one does not discard the others.
+    """
     if model is None:
         model = DEFAULT_MODELS["openai"]
 
@@ -131,8 +142,8 @@ def create_openai_config(
         max_tokens=max_tokens,
         thinking=thinking,
         model=model,
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_organization=os.getenv("OPENAI_ORGANIZATION"),
+        openai_api_key=api_key or os.getenv("OPENAI_API_KEY"),
+        openai_organization=organization or os.getenv("OPENAI_ORGANIZATION"),
     )
 
 
@@ -141,8 +152,15 @@ def create_vertex_config(
     temperature: float | None = None,
     max_tokens: int | None = None,
     thinking: str | int | None = None,
+    project_id: str | None = None,
+    location: str | None = None,
 ) -> LLMConfig:
-    """Create Vertex AI configuration from environment variables."""
+    """Create Vertex AI configuration, from arguments or the environment.
+
+    Project and region are arguments because they are not ambient facts about
+    the process: model availability, quota and billing all vary by region, and
+    a caller may need a different project for a different class of work.
+    """
     if model is None:
         model = DEFAULT_MODELS["vertex"]
 
@@ -152,8 +170,8 @@ def create_vertex_config(
         max_tokens=max_tokens,
         thinking=thinking,
         model=model,
-        vertex_project_id=os.getenv("VERTEX_PROJECT_ID"),
-        vertex_location=os.getenv("VERTEX_LOCATION"),
+        vertex_project_id=project_id or os.getenv("VERTEX_PROJECT_ID"),
+        vertex_location=location or os.getenv("VERTEX_LOCATION"),
     )
 
 

@@ -53,13 +53,13 @@ Install from the GitHub repository using Poetry, naming the extras you need:
 
 ```toml
 [tool.poetry.dependencies]
-reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.8.4", extras = ["anthropic"]}
+reusable-llm-provider = {git = "https://github.com/newexo/reusable-llm-provider.git", tag = "v0.9.0", extras = ["anthropic"]}
 ```
 
 Or with pip:
 
 ```bash
-pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.8.4"
+pip install "reusable-llm-provider[anthropic] @ git+https://github.com/newexo/reusable-llm-provider.git@v0.9.0"
 ```
 
 Several extras may be combined: `extras = ["anthropic", "ollama"]`. Use `all` if
@@ -113,7 +113,32 @@ config = create_vertex_config()
 config = create_ollama_config(model="llama2")
 ```
 
-The package does **not** load `.env` files or read environment variables implicitly. Callers that wish to use `.env` files should invoke `python-dotenv` in their own application code before constructing a config.
+Every credential may also be passed directly, in which case the argument wins
+and the environment is the fallback:
+
+```python
+# A project and region chosen per call, not per process
+config = create_vertex_config(
+    project_id="video-summaries",
+    location="us-west1",
+)
+
+# Mixed: an explicit region, VERTEX_PROJECT_ID still from the environment
+config = create_vertex_config(location="us-west1")
+
+config = create_anthropic_config(api_key=secrets.lookup("anthropic"))
+config = create_openai_config(api_key=..., organization=...)
+```
+
+Each credential falls back independently, so passing one never discards the
+others. This matters most for Vertex: model availability, quota and billing all
+vary by region, and work that must not share a billing or audit trail needs a
+different project — none of which is an ambient fact about the process.
+
+The package does **not** load `.env` files or read environment variables other
+than through these factories, and never on its own initiative. Callers that wish
+to use `.env` files should invoke `python-dotenv` in their own application code
+before constructing a config.
 
 ### Direct Construction
 
@@ -402,4 +427,5 @@ reusable-llm-provider/
 - **Unset means absent, not null.** Optional controls default to `None` and are omitted from the request entirely. Several providers reject parameters their newer models no longer support, so sending a default value makes those models unusable.
 - **Backends are optional, and absence is actionable.** Vendor SDKs are extras rather than hard dependencies, imported inside the constructor that needs them. A consumer of one backend does not install, or wait for, the other three. The cost of that choice is that a missing backend fails at construction rather than at import, so the failure names the extra to install and chains the original `ModuleNotFoundError` as its cause.
 - **Nothing ships that a consumer cannot use.** The package holds no path helpers, data directory or environment loading, because every one of those addresses the repository rather than the installed package: from a wheel they resolve inside `site-packages` and mean nothing. Repository-addressing code lives with the tests that need it.
+- **The LangChain model is built on first use.** Only `invoke_structured` needs it, so a caller that only generates free-form text never constructs one, and never inherits its failure modes. Each provider's native client stays eager, so a missing extra is still reported by `create_provider` rather than at the first structured call.
 - **Thin wrapper.** The abstraction is intentionally minimal. It unifies construction and invocation, but does not attempt to normalize provider-specific features such as streaming or multimodal inputs.
