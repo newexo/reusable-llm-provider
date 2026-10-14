@@ -404,12 +404,12 @@ class TestEmptyOutputIsAnError:
             AnthropicProvider(config).invoke("test prompt")
         assert exc_info.value.provider == "anthropic"
 
-    @patch("google.genai")
-    def test_vertex_none_text_raises(self, mock_genai):
+    @patch("google.genai.Client")
+    def test_vertex_none_text_raises(self, mock_client_class):
         """Vertex sets .text to None when the budget ran out before output."""
         mock_client = Mock()
         mock_client.models.generate_content.return_value = Mock(text=None)
-        mock_genai.Client.return_value = mock_client
+        mock_client_class.return_value = mock_client
 
         config = LLMConfig(
             provider=LLMProviderType.VERTEX,
@@ -737,9 +737,9 @@ class TestChatModelIsLazy:
         )
         mock_chat.assert_not_called()
 
-    @patch("google.genai")
+    @patch("google.genai.Client")
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
-    def test_vertex_defers_its_chat_model(self, mock_chat, _mock_genai):
+    def test_vertex_defers_its_chat_model(self, mock_chat, _mock_client):
         VertexAIProvider(
             LLMConfig(
                 provider=LLMProviderType.VERTEX,
@@ -786,3 +786,120 @@ class TestChatModelIsLazy:
                     provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k"
                 )
             )
+
+
+class TestCredentialsReachTheClient:
+    """Credentials must arrive at the SDK, not merely at the config object.
+
+    `test_config.py` proves a credential reaches `LLMConfig`; these prove it
+    travels the rest of the way. Nothing covered that gap before, and it is not
+    reachable from the functional tests either: this machine's ADC resolves to
+    the same Vertex project as `VERTEX_PROJECT_ID`, so a live call succeeds
+    whether the value is read from the environment or silently defaulted by the
+    client. Deleting `VERTEX_PROJECT_ID` from `secrets/.env` would not fail a
+    single live test. Only an assertion on the constructor call can tell the
+    two apart, so that assertion lives here.
+
+    Both hand-offs are covered per provider, because they are separate code
+    paths: the native client built in `__init__`, and the LangChain model built
+    on first use by `_build_chat_model`.
+    """
+
+    @patch("anthropic.Anthropic")
+    def test_anthropic_client_receives_the_api_key(self, mock_client):
+        AnthropicProvider(
+            LLMConfig(
+                provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k-1"
+            )
+        )
+        assert mock_client.call_args.kwargs["api_key"] == "k-1"
+
+    @patch("anthropic.Anthropic")
+    @patch("langchain_anthropic.ChatAnthropic")
+    def test_anthropic_chat_model_receives_the_api_key(self, mock_chat, _mock_client):
+        provider = AnthropicProvider(
+            LLMConfig(
+                provider=LLMProviderType.ANTHROPIC, model="m", anthropic_api_key="k-1"
+            )
+        )
+        _ = provider.chat_model
+        assert mock_chat.call_args.kwargs["api_key"] == "k-1"
+
+    @patch("openai.OpenAI")
+    def test_openai_client_receives_the_key_and_organization(self, mock_client):
+        OpenAIProvider(
+            LLMConfig(
+                provider=LLMProviderType.OPENAI,
+                model="m",
+                openai_api_key="k-2",
+                openai_organization="org-2",
+            )
+        )
+        assert mock_client.call_args.kwargs["api_key"] == "k-2"
+        assert mock_client.call_args.kwargs["organization"] == "org-2"
+
+    @patch("openai.OpenAI")
+    @patch("langchain_openai.ChatOpenAI")
+    def test_openai_chat_model_receives_the_key_and_organization(
+        self, mock_chat, _mock_client
+    ):
+        provider = OpenAIProvider(
+            LLMConfig(
+                provider=LLMProviderType.OPENAI,
+                model="m",
+                openai_api_key="k-2",
+                openai_organization="org-2",
+            )
+        )
+        _ = provider.chat_model
+        assert mock_chat.call_args.kwargs["api_key"] == "k-2"
+        assert mock_chat.call_args.kwargs["organization"] == "org-2"
+
+    @patch("google.genai.Client")
+    def test_vertex_client_receives_the_project_and_location(self, mock_client):
+        VertexAIProvider(
+            LLMConfig(
+                provider=LLMProviderType.VERTEX,
+                model="m",
+                vertex_project_id="proj-3",
+                vertex_location="us-west4",
+            )
+        )
+        assert mock_client.call_args.kwargs["project"] == "proj-3"
+        assert mock_client.call_args.kwargs["location"] == "us-west4"
+
+    @patch("google.genai.Client")
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI")
+    def test_vertex_chat_model_receives_the_project_and_location(
+        self, mock_chat, _mock_client
+    ):
+        provider = VertexAIProvider(
+            LLMConfig(
+                provider=LLMProviderType.VERTEX,
+                model="m",
+                vertex_project_id="proj-3",
+                vertex_location="us-west4",
+            )
+        )
+        _ = provider.chat_model
+        assert mock_chat.call_args.kwargs["project"] == "proj-3"
+        assert mock_chat.call_args.kwargs["location"] == "us-west4"
+
+    @patch("google.genai.Client")
+    def test_vertex_passes_none_through_so_the_client_can_default(self, mock_client):
+        """An absent project is delegated, not invented.
+
+        With nothing in the environment the factory yields None, and None is
+        handed to the client so its own resolution applies -- ADC's project and
+        the client's default region. Verified live on 2026-10-13: the call
+        succeeds, reaching the ADC project at location 'global'.
+
+        This is the agreed behaviour for deployment inside GCP, where the
+        ambient service identity is the right answer and naming a project in
+        the environment would be the wrong one. The test exists so the
+        delegation stays deliberate: substituting a hardcoded default here
+        would silently route production traffic elsewhere.
+        """
+        VertexAIProvider(LLMConfig(provider=LLMProviderType.VERTEX, model="m"))
+        assert mock_client.call_args.kwargs["project"] is None
+        assert mock_client.call_args.kwargs["location"] is None
